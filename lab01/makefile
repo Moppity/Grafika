@@ -5,7 +5,7 @@ TARGET = greenTri
 SRCS = greenTri.cpp glad.c framework.cpp
 
 # A könyvtárak és az include fájlok
-INCLUDES = -I. -I../include -I/usr/include/glm
+INCLUDES = -I../include -I/usr/include/glm
 
 # A használt könyvtárak
 LIBS = -lstdc++fs -lglfw -lGL
