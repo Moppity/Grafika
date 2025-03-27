@@ -29,10 +29,20 @@ const char *fragSource = R"(
 	}
 )";
 
+// Az egyszerűbb használat érdekében
+using namespace glm;
+
 const int winWidth = 600, winHeight = 600;
 const float worldWidth = 20.0f;  // 20m széles világ
 const float worldHeight = 20.0f; // 20m magas világ
 const float g = 40.0f;           // nehézségi gyorsulás m/s^2-ben
+
+// Állapot enumeráció a gondola állapotaihoz
+enum GondolaState {
+    WAITING,    // várakozik
+    ROLLING,    // mozgásban
+    FALLEN      // leesett
+};
 
 //---------------------------
 // Camera osztály
@@ -201,7 +211,73 @@ public:
         return controlPoints.size();
     }
     
-    // Spline kirajzolása
+    // Görbe paraméteres egyenlete: r(t)
+    vec2 r(float t) {
+        if (controlPoints.size() < 2) return vec2(0, 0);
+        
+        // t paraméter korlátozása a [0, n-1] tartományra, ahol n a kontrollpontok száma
+        if (t < 0) t = 0;
+        if (t > controlPoints.size() - 1) t = controlPoints.size() - 1;
+        
+        // Egész és tört rész kiszámítása
+        int i = (int)t;
+        float u = t - i;
+        
+        // Kontrollpontok kiválasztása
+        vec2 p0 = (i > 0) ? controlPoints[i-1] : controlPoints[i];
+        vec2 p1 = controlPoints[i];
+        vec2 p2 = (i < controlPoints.size() - 1) ? controlPoints[i+1] : controlPoints[i];
+        vec2 p3 = (i < controlPoints.size() - 2) ? controlPoints[i+2] : p2;
+        
+        // A kezdő és végpontokban nulla sebességvektor (Hermite feltétel)
+        if (i == 0) p0 = p1 - (p2 - p1) * 0.01f;
+        if (i >= controlPoints.size() - 2) p3 = p2 + (p2 - p1) * 0.01f;
+        
+        // Spline kiértékelése
+        return CatmullRom(p0, p1, p2, p3, u);
+    }
+    
+    // Görbe deriváltja adott paraméternél: r'(t)
+    vec2 rDerivative(float t) {
+        if (controlPoints.size() < 2) return vec2(0, 0);
+        
+        // t paraméter korlátozása a [0, n-1] tartományra, ahol n a kontrollpontok száma
+        if (t < 0) t = 0;
+        if (t > controlPoints.size() - 1) t = controlPoints.size() - 1;
+        
+        // Egész és tört rész kiszámítása
+        int i = (int)t;
+        float u = t - i;
+        
+        // Kontrollpontok kiválasztása
+        vec2 p0 = (i > 0) ? controlPoints[i-1] : controlPoints[i];
+        vec2 p1 = controlPoints[i];
+        vec2 p2 = (i < controlPoints.size() - 1) ? controlPoints[i+1] : controlPoints[i];
+        vec2 p3 = (i < controlPoints.size() - 2) ? controlPoints[i+2] : p2;
+        
+        // A kezdő és végpontokban nulla sebességvektor (Hermite feltétel)
+        if (i == 0) p0 = p1 - (p2 - p1) * 0.01f;
+        if (i >= controlPoints.size() - 2) p3 = p2 + (p2 - p1) * 0.01f;
+        
+        // Derivált kiértékelése
+        return CatmullRomDerivative(p0, p1, p2, p3, u);
+    }
+    
+    // Egységvektor a pálya érintője irányában T(t)
+    vec2 T(float t) {
+        vec2 derivative = rDerivative(t);
+        float len = length(derivative);
+        if (len < 0.0001f) return vec2(1, 0); // Ha túl kicsi a hossz, vízszintes vektort adunk vissza
+        return derivative / len;
+    }
+    
+    // Normálvektor a pálya érintőjére merőlegesen N(t)
+    vec2 N(float t) {
+        vec2 tangent = T(t);
+        return vec2(-tangent.y, tangent.x); // 90 fokos elforgatás
+    }
+    
+    // Görbe kirajzolása
     void Draw(GPUProgram* gpuProgram) {
         // Ha nincs elég pont, nem rajzolunk
         if (controlPoints.size() < 2) return;
@@ -214,10 +290,209 @@ public:
         glPointSize(10.0f);
         pointGeometry->Draw(gpuProgram, GL_POINTS, vec3(1.0f, 0.0f, 0.0f));
     }
+};
+
+//---------------------------
+// Gondola osztály a kerékhez
+class Gondola {
+private:
+    Geometry<vec2> *wheel;        // kör geometria
+    Geometry<vec2> *spokes;       // küllők geometria
+    Spline *track;                // pálya referencia
     
-    // Kontrollpontok számának lekérdezése
-    int getControlPointCount() const {
-        return controlPoints.size();
+    GondolaState state;          // állapot
+    float splineParam;           // pálya paraméter (t)
+    float wheelRadius;           // kerék sugara méterben
+    vec2 position;               // kerék pozíciója
+    float angle;                 // kerék elfordulása
+    float velocity;              // sebesség
+    float lambda;                // alaktényező a tehetetlenségi nyomatékhoz
+    
+    // Kör létrehozása
+    void createWheel(float radius) {
+        wheel = new Geometry<vec2>();
+        
+        // Kör létrehozása
+        const int segments = 36;
+        std::vector<vec2> vertices;
+        
+        // Középpont
+        vertices.push_back(vec2(0, 0));
+        
+        // Körvonal pontjai
+        for (int i = 0; i <= segments; i++) {
+            float phi = i * 2 * M_PI / segments;
+            vertices.push_back(vec2(radius * cos(phi), radius * sin(phi)));
+        }
+        
+        // Geometria beállítása
+        wheel->Vtx() = vertices;
+        wheel->updateGPU();
+    }
+    
+    // Küllők létrehozása
+    void createSpokes(float radius) {
+        spokes = new Geometry<vec2>();
+        
+        // Küllők pontjai
+        std::vector<vec2> vertices;
+        
+        // 2 küllő létrehozása
+        vertices.push_back(vec2(0, 0));
+        vertices.push_back(vec2(radius, 0));
+        
+        vertices.push_back(vec2(0, 0));
+        vertices.push_back(vec2(0, radius));
+        
+        // Geometria beállítása
+        spokes->Vtx() = vertices;
+        spokes->updateGPU();
+    }
+    
+    // Szükséges centripetális erő kiszámítása
+    float calculateCentripetalForce(float param) {
+        // Kanyar görbülete
+        vec2 tangent = track->T(param);
+        vec2 normal = track->N(param);
+        vec2 derivative2 = track->rDerivative(param); // Második derivált, egyszerűsített
+        
+        // Görbület számítása (κ)
+        float speed = length(derivative2);
+        float curvature = 0.0f;
+        if (speed > 0.0001f) {
+            // Görbület: κ = |r''(t) · N(t)| / |r'(t)|²
+            curvature = abs(dot(derivative2, normal)) / pow(length(tangent), 2.0f);
+        }
+        
+        // Centripetális erő: F = m·v²·κ
+        return velocity * velocity * curvature;
+    }
+    
+    // Ellenőrizzük, hogy a kerék a pályán marad-e
+    bool staysOnTrack(float param) {
+        // Normálvektor a pályára
+        vec2 normal = track->N(param);
+        
+        // A nehézségi erő és a centripetális erő normálirányú komponense
+        float normalGravity = dot(vec2(0, -g), normal); // g negatív Y irányba mutat
+        float centripetalForce = calculateCentripetalForce(param);
+        
+        // A pályán marad, ha a kényszererő pozitív (nyomja a pályát)
+        // K = m * (g·N + v²κ) > 0
+        return (normalGravity + centripetalForce) > 0;
+    }
+    
+    // Ellenőrizzük, hogy a kerék nem mozog-e visszafelé
+    bool isMovingBackwards() {
+        // Az érintővektor és a sebesség előjele
+        vec2 tangent = track->T(splineParam);
+        return velocity < 0;
+    }
+    
+public:
+    Gondola(Spline *trackRef) : track(trackRef) {
+        state = WAITING;
+        splineParam = 0.01f;  // kezdő paraméter a görbén
+        wheelRadius = 1.0f;   // 1m sugár
+        position = vec2(0, 0);
+        angle = 0.0f;
+        velocity = 0.0f;
+        lambda = 1.0f;        // homogén tömegeloszlás a peremén
+        
+        // Kerék és küllők létrehozása
+        createWheel(wheelRadius);
+        createSpokes(wheelRadius);
+    }
+    
+    ~Gondola() {
+        delete wheel;
+        delete spokes;
+    }
+    
+    // Kerék indítása
+    void Start() {
+        if (state == WAITING && track->getNumControlPoints() >= 2) {
+            state = ROLLING;
+            splineParam = 0.01f;
+            position = track->r(splineParam);
+            angle = 0.0f;
+            velocity = 0.0f;
+        }
+    }
+    
+    // Kerék állapotának frissítése
+    void Animate(float dt) {
+        if (state != ROLLING || track->getNumControlPoints() < 2) return;
+        
+        // Pálya érintő és normál vektorai
+        vec2 tangent = track->T(splineParam);
+        vec2 normal = track->N(splineParam);
+        
+        // Aktuális pozíció a pályán
+        position = track->r(splineParam) + normal * wheelRadius;
+        
+        // Gravitáció komponensei
+        vec2 gravity(0, -g);  // g lefelé mutat (negatív y irányba)
+        float tangentialGravity = dot(gravity, tangent);
+        
+        // Sebesség változás számítása
+        // dv/dt = g·T / (1 + λ)
+        float acceleration = tangentialGravity / (1.0f + lambda);
+        velocity += acceleration * dt;
+        
+        // Ellenőrizzük, hogy a kerék a pályán marad-e
+        if (!staysOnTrack(splineParam)) {
+            state = FALLEN;
+            return;
+        }
+        
+        // Ellenőrizzük, hogy a kerék nem mozog-e visszafelé
+        if (isMovingBackwards()) {
+            // Ha visszafelé mozog, teleportáljuk a kezdőpontra
+            splineParam = 0.01f;
+            position = track->r(splineParam);
+            angle = 0.0f;
+            velocity = 0.0f;
+            return;
+        }
+        
+        // Paraméter frissítése a sebesség alapján
+        // Δτ = v·Δt / |r'(τ)|
+        float paramStep = velocity * dt / length(track->rDerivative(splineParam));
+        splineParam += paramStep;
+        
+        // Szögsebesség: ω = -v/R
+        float angularVelocity = -velocity / wheelRadius;
+        angle += angularVelocity * dt;
+    }
+    
+    // Kerék kirajzolása
+    void Draw(GPUProgram* gpuProgram, const mat4& viewMatrix) {
+        if (state == WAITING || track->getNumControlPoints() < 2) return;
+        
+        // Modell transzformáció beállítása
+        mat4 modelMatrix = translate(mat4(1.0f), vec3(position, 0));
+        modelMatrix = rotate(modelMatrix, angle, vec3(0, 0, 1));
+        
+        // MVP mátrix beállítása
+        mat4 mvpMatrix = viewMatrix * modelMatrix;
+        gpuProgram->setUniform(mvpMatrix, "MVP");
+        
+        // Kerék kirajzolása
+        glPointSize(1.0f);
+        wheel->Draw(gpuProgram, GL_TRIANGLE_FAN, vec3(0, 0, 1)); // kék kitöltés
+        
+        // Körvonal kirajzolása
+        glLineWidth(2.0f);
+        wheel->Draw(gpuProgram, GL_LINE_LOOP, vec3(1, 1, 1)); // fehér körvonal
+        
+        // Küllők kirajzolása
+        spokes->Draw(gpuProgram, GL_LINES, vec3(1, 1, 1)); // fehér küllők
+    }
+    
+    // Állapot lekérdezése
+    GondolaState getState() const {
+        return state;
     }
 };
 
@@ -225,6 +500,7 @@ class RollerCoasterApp : public glApp {
     Spline *track;          // pálya
     GPUProgram *gpuProgram; // csúcspont és pixel árnyalók
     Camera *camera;         // virtuális kamera
+    Gondola *gondola;       // kerék (gondola)
 public:
     RollerCoasterApp() : glApp("Hullámvasút szimuláció") {}
 
@@ -235,6 +511,9 @@ public:
         
         // Pálya inicializálása
         track = new Spline();
+        
+        // Gondola inicializálása
+        gondola = new Gondola(track);
         
         // GPU program inicializálása
         gpuProgram = new GPUProgram(vertSource, fragSource);
@@ -251,6 +530,17 @@ public:
         
         // Pálya kirajzolása
         track->Draw(gpuProgram);
+        
+        // Gondola kirajzolása
+        gondola->Draw(gpuProgram, camera->getMVP());
+    }
+    
+    // Billentyűzet kezelése
+    void onKeyboard(int key) {
+        if (key == ' ') { // SPACE
+            gondola->Start(); // Kerék indítása
+            refreshScreen();
+        }
     }
     
     // Egér lenyomás kezelése
@@ -269,6 +559,13 @@ public:
     
     // Idő változása
     void onTimeElapsed(float startTime, float endTime) {
+        // Időlépés számítása
+        float dt = endTime - startTime;
+        
+        // Gondola animálása
+        gondola->Animate(dt);
+        
+        // Újrarajzolás kérése
         refreshScreen();
     }
     
@@ -277,6 +574,7 @@ public:
         delete track;
         delete gpuProgram;
         delete camera;
+        delete gondola;
     }
 };
 
