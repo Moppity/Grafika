@@ -351,21 +351,8 @@ private:
     
     // Szükséges centripetális erő kiszámítása
     float calculateCentripetalForce(float param) {
-        // Kanyar görbülete
-        vec2 tangent = track->T(param);
-        vec2 normal = track->N(param);
-        vec2 derivative2 = track->rDerivative(param); // Második derivált, egyszerűsített
-        
-        // Görbület számítása (κ)
-        float speed = length(derivative2);
-        float curvature = 0.0f;
-        if (speed > 0.0001f) {
-            // Görbület: κ = |r''(t) · N(t)| / |r'(t)|²
-            curvature = abs(dot(derivative2, normal)) / pow(length(tangent), 2.0f);
-        }
-        
-        // Centripetális erő: F = m·v²·κ
-        return velocity * velocity * curvature;
+        // Sebesség négyzete és a görbület szorzata
+        return velocity * velocity * getCurvature(param);
     }
     
     // Ellenőrizzük, hogy a kerék a pályán marad-e
@@ -374,7 +361,8 @@ private:
         vec2 normal = track->N(param);
         
         // A nehézségi erő és a centripetális erő normálirányú komponense
-        float normalGravity = dot(vec2(0, -g), normal); // g negatív Y irányba mutat
+        vec2 gravity(0, -g);
+        float normalGravity = dot(gravity, normal); // g negatív Y irányba mutat
         float centripetalForce = calculateCentripetalForce(param);
         
         // A pályán marad, ha a kényszererő pozitív (nyomja a pályát)
@@ -384,8 +372,7 @@ private:
     
     // Ellenőrizzük, hogy a kerék nem mozog-e visszafelé
     bool isMovingBackwards() {
-        // Az érintővektor és a sebesség előjele
-        vec2 tangent = track->T(splineParam);
+        // Egyszerűen a sebesség előjele
         return velocity < 0;
     }
     
@@ -413,10 +400,11 @@ public:
     void Start() {
         if (state == WAITING && track->getNumControlPoints() >= 2) {
             state = ROLLING;
+            // Mindig a 0.01 paraméterű pontnál indítunk
             splineParam = 0.01f;
             position = track->r(splineParam);
             angle = 0.0f;
-            velocity = 0.0f;
+            velocity = 0.0f; // Nulla kezdősebességgel indulunk
         }
     }
     
@@ -429,41 +417,76 @@ public:
         vec2 normal = track->N(splineParam);
         
         // Aktuális pozíció a pályán
-        position = track->r(splineParam) + normal * wheelRadius;
+        position = track->r(splineParam);
         
         // Gravitáció komponensei
         vec2 gravity(0, -g);  // g lefelé mutat (negatív y irányba)
         float tangentialGravity = dot(gravity, tangent);
         
-        // Sebesség változás számítása
-        // dv/dt = g·T / (1 + λ)
+        // Gyorsulás számítása a gravitáció tangenciális komponenséből
+        // a = g·T / (1 + λ)
         float acceleration = tangentialGravity / (1.0f + lambda);
+        
+        // Sebesség frissítése a gyorsulás alapján
         velocity += acceleration * dt;
         
-        // Ellenőrizzük, hogy a kerék a pályán marad-e
-        if (!staysOnTrack(splineParam)) {
-            state = FALLEN;
-            return;
-        }
+        // Debug kiírás
+        printf("param: %.2f, pos: (%.2f, %.2f), vel: %.2f, acc: %.2f\n", 
+               splineParam, position.x, position.y, velocity, acceleration);
         
-        // Ellenőrizzük, hogy a kerék nem mozog-e visszafelé
-        if (isMovingBackwards()) {
-            // Ha visszafelé mozog, teleportáljuk a kezdőpontra
-            splineParam = 0.01f;
-            position = track->r(splineParam);
-            angle = 0.0f;
-            velocity = 0.0f;
+        // Normálerő számítása
+        // A nehézségi erő és a centripetális erő normálirányú komponense
+        float normalGravity = dot(gravity, normal);
+        float centripetalAcceleration = velocity * velocity * getCurvature(splineParam);
+        float normalForce = normalGravity + centripetalAcceleration;
+        
+        // Ellenőrizzük, hogy a kerék a pályán marad-e (pozitív normálerő)
+        if (normalForce <= 0) {
+            state = FALLEN;
             return;
         }
         
         // Paraméter frissítése a sebesség alapján
         // Δτ = v·Δt / |r'(τ)|
-        float paramStep = velocity * dt / length(track->rDerivative(splineParam));
-        splineParam += paramStep;
+        float derivativeLength = length(track->rDerivative(splineParam));
+        if (derivativeLength > 0.0001f) {
+            float paramStep = velocity * dt / derivativeLength;
+            
+            // Frissítjük a paramétert
+            splineParam += paramStep;
+            
+            // Biztosítjuk, hogy a paraméter a görbe tartományában maradjon
+            float maxParam = float(track->getNumControlPoints() - 1);
+            if (splineParam < 0.01f || splineParam >= maxParam) {
+                // Ha kimegy a tartományból, visszaállítjuk a kezdőpontra
+                splineParam = 0.01f;
+                velocity = 0.0f;
+            }
+        }
+        
+        // Kerék középpontjának pozíció frissítése
+        position = track->r(splineParam) + normal * wheelRadius;
         
         // Szögsebesség: ω = -v/R
         float angularVelocity = -velocity / wheelRadius;
         angle += angularVelocity * dt;
+    }
+    
+    // Görbület számítása adott paraméternél
+    float getCurvature(float t) {
+        vec2 firstDerivative = track->rDerivative(t);
+        vec2 normalVector = track->N(t);
+        
+        // Második derivált közelítése
+        float deltaT = 0.001f;
+        vec2 nextDerivative = track->rDerivative(t + deltaT);
+        vec2 secondDerivative = (nextDerivative - firstDerivative) / deltaT;
+        
+        // Görbület: κ = |r''·N| / |r'|²
+        float firstDerivMagnitudeSq = dot(firstDerivative, firstDerivative);
+        if (firstDerivMagnitudeSq < 0.0001f) return 0.0f;
+        
+        return abs(dot(secondDerivative, normalVector)) / firstDerivMagnitudeSq;
     }
     
     // Kerék kirajzolása
