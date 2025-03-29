@@ -447,54 +447,74 @@ public:
             state = ROLLING;
             // A pálya első pontján indítjuk a kereket
             splineParam = 0.01f;
-            // Pozíció az első pont és a normálvektor alapján
+            // Pálya helyzetének és normálvektorának számítása
             vec2 pathPosition = track->r(splineParam);
             vec2 normal = track->N(splineParam);
+            // Kerék pozíciója: a kerék alja a pályán
             position = pathPosition + normal * wheelRadius;
             angle = 0.0f;
-            velocity = 0.00f; // Adunk egy kis kezdősebességet, hogy biztosan elinduljon
+            velocity = 0.0f; // Nulláról indul
         }
     }
     
     void Animate(float dt) {
-        if (state != ROLLING || track->getNumControlPoints() < 2) return;
-        
-        // Pálya érintő és normál vektorai
-        vec2 tangent = track->T(splineParam);
-        vec2 normal = track->N(splineParam);
-        
-        // Pálya aktuális pontja
-        vec2 pathPosition = track->r(splineParam);
-        
-        // Gravitáció vektor (g lefelé mutat, negatív y irányba)
-        vec2 gravity(0, -g);
-        
-        float tangentialGravity = gravity.x * tangent.x + gravity.y * tangent.y;
-        
-        // Gyorsulás számítása
-        float acceleration = tangentialGravity;
-        
-        // Sebesség frissítése a gyorsulás alapján
-        velocity += acceleration * dt;
-        
-        // Spline paraméter frissítése a sebesség alapján
-        vec2 derivVec = track->rDerivative(splineParam);
-        float derivLength = sqrt(derivVec.x * derivVec.x + derivVec.y * derivVec.y);
-        
-        // Biztonsági ellenőrzés a nullával való osztás elkerülésére
-        if (derivLength < 0.0001f) derivLength = 0.0001f;
-        
-        float paramStep = velocity * dt / derivLength;
-        splineParam += paramStep;
-        
-        // Pozíció frissítése: a kerék középpontja a pályaponttól a normálvektor irányában van
+    if (state != ROLLING || track->getNumControlPoints() < 2) return;
+
+    // Pálya érintő és normál vektorai
+    vec2 tangent = track->T(splineParam);
+    vec2 normal = track->N(splineParam);
+
+    // Pálya aktuális pontja
+    vec2 pathPosition = track->r(splineParam);
+
+    // Gravitáció vektor 
+    vec2 gravity(0, -g);
+
+    // Érintő irányú gravitációs komponens
+    float tangentialGravity = gravity.x * tangent.x + gravity.y * tangent.y;
+
+    // Gyorsulás számítása
+    float acceleration = tangentialGravity;
+
+    // Sebesség frissítése
+    velocity += acceleration * dt;
+
+    // Ellenőrizzük, hogy a kerék nem indul-e visszafelé
+    if (velocity < 0) {
+        // Visszahelyezés a kezdőponthoz
+        splineParam = 0.01f;
         pathPosition = track->r(splineParam);
         normal = track->N(splineParam);
         position = pathPosition + normal * wheelRadius;
-        
-        // Kerék elfordulási szögének frissítése
-        float angularVelocity = -velocity / wheelRadius;
-        angle += angularVelocity * dt;
+        velocity = 0.0f;
+        angle = 0.0f;
+        return;
+    }
+
+    // Spline paraméter frissítése
+    vec2 derivVec = track->rDerivative(splineParam);
+    float derivLength = sqrt(derivVec.x * derivVec.x + derivVec.y * derivVec.y);
+    
+    // Biztonsági ellenőrzés
+    if (derivLength < 0.0001f) derivLength = 0.0001f;
+    
+    float paramStep = velocity * dt / derivLength;
+    splineParam += paramStep;
+    
+    // Ellenőrizze, hogy a kerék nem hagyja-e el a pályát
+    if (splineParam >= track->getNumControlPoints() - 1) {
+        state = FALLEN;  // vagy más jelzés, hogy leesett
+        return;
+    }
+    
+    
+    pathPosition = track->r(splineParam);
+    normal = track->N(splineParam);
+    position = pathPosition + normal * wheelRadius;
+    
+  
+    float angularVelocity = velocity / wheelRadius;
+    angle += angularVelocity * dt;
     }
     
     // Kerék kirajzolása
