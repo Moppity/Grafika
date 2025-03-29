@@ -1,6 +1,12 @@
+<<<<<<< Updated upstream
+<<<<<<< Updated upstream
 //=============================================================================================
 // Hullámvasút szimuláció Catmull-Rom Spline-nal
 //=============================================================================================
+=======
+>>>>>>> Stashed changes
+=======
+>>>>>>> Stashed changes
 #include "./framework.h"
 
 // csúcspont árnyaló
@@ -29,9 +35,6 @@ const char *fragSource = R"(
 	}
 )";
 
-// Az egyszerűbb használat érdekében
-using namespace glm;
-
 const int winWidth = 600, winHeight = 600;
 const float worldWidth = 20.0f;  // 20m széles világ
 const float worldHeight = 20.0f; // 20m magas világ
@@ -44,8 +47,32 @@ enum GondolaState {
     FALLEN      // leesett
 };
 
+<<<<<<< Updated upstream
+<<<<<<< Updated upstream
 //---------------------------
 // Camera osztály
+=======
+=======
+>>>>>>> Stashed changes
+// Saját mátrix inverz függvény
+mat4 invertMatrix(const mat4& m) {
+    // Egyszerűsített 4x4 mátrix inverz (csak eltolást és skálázást kezel)
+    mat4 inv(1.0f);
+    
+    // Az eltolás inverze
+    inv[3][0] = -m[3][0];
+    inv[3][1] = -m[3][1];
+    inv[3][2] = -m[3][2];
+    
+    // A skálázás inverze
+    if (m[0][0] != 0) inv[0][0] = 1.0f / m[0][0];
+    if (m[1][1] != 0) inv[1][1] = 1.0f / m[1][1];
+    if (m[2][2] != 0) inv[2][2] = 1.0f / m[2][2];
+    
+    return inv;
+}
+
+>>>>>>> Stashed changes
 class Camera {
 private:
     vec2 center;         // kamera közepének pozíciója világkoordinátákban
@@ -58,14 +85,18 @@ private:
     
     void updateMatrices() {
         // View mátrix számítása - eltolás a világ középpontjába
-        viewMatrix = translate(mat4(1.0f), vec3(-center.x, -center.y, 0.0f));
+        viewMatrix = mat4(1.0f);
+        viewMatrix[3][0] = -center.x;
+        viewMatrix[3][1] = -center.y;
         
         // Projekciós mátrix - skálázás a [-1,1] tartományba
-        projMatrix = scale(mat4(1.0f), vec3(2.0f/width, 2.0f/height, 1.0f));
+        projMatrix = mat4(1.0f);
+        projMatrix[0][0] = 2.0f/width;
+        projMatrix[1][1] = 2.0f/height;
         
         // Inverz mátrixok számítása
-        invViewMatrix = inverse(viewMatrix);
-        invProjMatrix = inverse(projMatrix);
+        invViewMatrix = invertMatrix(viewMatrix);
+        invProjMatrix = invertMatrix(projMatrix);
         
         // Teljes MVP mátrix számítása
         MVPMatrix = projMatrix * viewMatrix;
@@ -79,7 +110,7 @@ public:
     
     // Világkoordináták átváltása képernyőkoordinátákra
     vec2 worldToScreen(const vec2& worldPos) {
-        vec4 clipPos = MVPMatrix * vec4(worldPos, 0.0f, 1.0f);
+        vec4 clipPos = MVPMatrix * vec4(worldPos.x, worldPos.y, 0.0f, 1.0f);
         return vec2(clipPos.x, clipPos.y);
     }
     
@@ -93,7 +124,7 @@ public:
         vec4 clipPos = vec4(ndcX, ndcY, 0.0f, 1.0f);
         
         // Visszatranszformálás világkoordinátákba
-        vec4 worldPos = invViewMatrix * invProjMatrix * clipPos;
+        vec4 worldPos = invProjMatrix * invViewMatrix * clipPos;
         
         return vec2(worldPos.x, worldPos.y);
     }
@@ -151,7 +182,7 @@ private:
             // 100 pontra felosztjuk a görbét
             const int segments = 100;
             
-            for (int i = 0; i < controlPoints.size() - 1; i++) {
+            for (size_t i = 0; i < controlPoints.size() - 1; i++) {
                 // Meghatározzuk a 4 kontrollpontot a szakaszhoz
                 vec2 p0 = (i > 0) ? controlPoints[i-1] : controlPoints[i];
                 vec2 p1 = controlPoints[i];
@@ -217,13 +248,16 @@ public:
         
         // t paraméter korlátozása a [0, n-1] tartományra, ahol n a kontrollpontok száma
         if (t < 0) t = 0;
-        if (t > controlPoints.size() - 1) t = controlPoints.size() - 1;
+        float maxParam = (float)(controlPoints.size() - 1);
+        if (t > maxParam) t = maxParam;
         
         // Egész és tört rész kiszámítása
         int i = (int)t;
         float u = t - i;
         
         // Kontrollpontok kiválasztása
+<<<<<<< Updated upstream
+<<<<<<< Updated upstream
         vec2 p0 = (i > 0) ? controlPoints[i-1] : controlPoints[i];
         vec2 p1 = controlPoints[i];
         vec2 p2 = (i < controlPoints.size() - 1) ? controlPoints[i+1] : controlPoints[i];
@@ -233,6 +267,68 @@ public:
         if (i == 0) p0 = p1 - (p2 - p1) * 0.01f;
         if (i >= controlPoints.size() - 2) p3 = p2 + (p2 - p1) * 0.01f;
         
+=======
+        vec2 p0, p1, p2, p3;
+        
+        // Az indexek ellenőrzésével
+        if (i == 0) {
+            p0 = controlPoints[0];
+            p1 = controlPoints[0];
+            p2 = (controlPoints.size() > 1) ? controlPoints[1] : controlPoints[0];
+            p3 = (controlPoints.size() > 2) ? controlPoints[2] : p2;
+            
+            // Kezdőponti derivált nulla
+            p0 = p1 - (p2 - p1) * 0.01f;
+        }
+        else if (i >= (int)controlPoints.size() - 1) {
+            size_t n = controlPoints.size();
+            p0 = (n > 2) ? controlPoints[n-3] : controlPoints[0];
+            p1 = (n > 1) ? controlPoints[n-2] : controlPoints[0];
+            p2 = controlPoints[n-1];
+            p3 = controlPoints[n-1];
+            
+            // Végponti derivált nulla
+            p3 = p2 + (p2 - p1) * 0.01f;
+        }
+        else {
+            p0 = (i > 0) ? controlPoints[i-1] : controlPoints[i];
+            p1 = controlPoints[i];
+            p2 = controlPoints[i+1];
+            p3 = (i < (int)controlPoints.size() - 2) ? controlPoints[i+2] : p2;
+        }
+        
+>>>>>>> Stashed changes
+=======
+        vec2 p0, p1, p2, p3;
+        
+        // Az indexek ellenőrzésével
+        if (i == 0) {
+            p0 = controlPoints[0];
+            p1 = controlPoints[0];
+            p2 = (controlPoints.size() > 1) ? controlPoints[1] : controlPoints[0];
+            p3 = (controlPoints.size() > 2) ? controlPoints[2] : p2;
+            
+            // Kezdőponti derivált nulla
+            p0 = p1 - (p2 - p1) * 0.01f;
+        }
+        else if (i >= (int)controlPoints.size() - 1) {
+            size_t n = controlPoints.size();
+            p0 = (n > 2) ? controlPoints[n-3] : controlPoints[0];
+            p1 = (n > 1) ? controlPoints[n-2] : controlPoints[0];
+            p2 = controlPoints[n-1];
+            p3 = controlPoints[n-1];
+            
+            // Végponti derivált nulla
+            p3 = p2 + (p2 - p1) * 0.01f;
+        }
+        else {
+            p0 = (i > 0) ? controlPoints[i-1] : controlPoints[i];
+            p1 = controlPoints[i];
+            p2 = controlPoints[i+1];
+            p3 = (i < (int)controlPoints.size() - 2) ? controlPoints[i+2] : p2;
+        }
+        
+>>>>>>> Stashed changes
         // Spline kiértékelése
         return CatmullRom(p0, p1, p2, p3, u);
     }
@@ -243,22 +339,80 @@ public:
         
         // t paraméter korlátozása a [0, n-1] tartományra, ahol n a kontrollpontok száma
         if (t < 0) t = 0;
-        if (t > controlPoints.size() - 1) t = controlPoints.size() - 1;
+        float maxParam = (float)(controlPoints.size() - 1);
+        if (t > maxParam) t = maxParam;
         
         // Egész és tört rész kiszámítása
         int i = (int)t;
         float u = t - i;
         
         // Kontrollpontok kiválasztása
-        vec2 p0 = (i > 0) ? controlPoints[i-1] : controlPoints[i];
-        vec2 p1 = controlPoints[i];
-        vec2 p2 = (i < controlPoints.size() - 1) ? controlPoints[i+1] : controlPoints[i];
-        vec2 p3 = (i < controlPoints.size() - 2) ? controlPoints[i+2] : p2;
+        vec2 p0, p1, p2, p3;
+<<<<<<< Updated upstream
         
+<<<<<<< Updated upstream
         // A kezdő és végpontokban nulla sebességvektor (Hermite feltétel)
         if (i == 0) p0 = p1 - (p2 - p1) * 0.01f;
         if (i >= controlPoints.size() - 2) p3 = p2 + (p2 - p1) * 0.01f;
+=======
+        // Az indexek ellenőrzésével
+        if (i == 0) {
+            p0 = controlPoints[0];
+            p1 = controlPoints[0];
+            p2 = (controlPoints.size() > 1) ? controlPoints[1] : controlPoints[0];
+            p3 = (controlPoints.size() > 2) ? controlPoints[2] : p2;
+            
+            // Kezdőponti derivált nulla
+            p0 = p1 - (p2 - p1) * 0.01f;
+        }
+        else if (i >= (int)controlPoints.size() - 1) {
+            size_t n = controlPoints.size();
+            p0 = (n > 2) ? controlPoints[n-3] : controlPoints[0];
+            p1 = (n > 1) ? controlPoints[n-2] : controlPoints[0];
+            p2 = controlPoints[n-1];
+            p3 = controlPoints[n-1];
+            
+            // Végponti derivált nulla
+            p3 = p2 + (p2 - p1) * 0.01f;
+        }
+        else {
+            p0 = (i > 0) ? controlPoints[i-1] : controlPoints[i];
+            p1 = controlPoints[i];
+            p2 = controlPoints[i+1];
+            p3 = (i < (int)controlPoints.size() - 2) ? controlPoints[i+2] : p2;
+        }
+>>>>>>> Stashed changes
         
+=======
+        
+        // Az indexek ellenőrzésével
+        if (i == 0) {
+            p0 = controlPoints[0];
+            p1 = controlPoints[0];
+            p2 = (controlPoints.size() > 1) ? controlPoints[1] : controlPoints[0];
+            p3 = (controlPoints.size() > 2) ? controlPoints[2] : p2;
+            
+            // Kezdőponti derivált nulla
+            p0 = p1 - (p2 - p1) * 0.01f;
+        }
+        else if (i >= (int)controlPoints.size() - 1) {
+            size_t n = controlPoints.size();
+            p0 = (n > 2) ? controlPoints[n-3] : controlPoints[0];
+            p1 = (n > 1) ? controlPoints[n-2] : controlPoints[0];
+            p2 = controlPoints[n-1];
+            p3 = controlPoints[n-1];
+            
+            // Végponti derivált nulla
+            p3 = p2 + (p2 - p1) * 0.01f;
+        }
+        else {
+            p0 = (i > 0) ? controlPoints[i-1] : controlPoints[i];
+            p1 = controlPoints[i];
+            p2 = controlPoints[i+1];
+            p3 = (i < (int)controlPoints.size() - 2) ? controlPoints[i+2] : p2;
+        }
+        
+>>>>>>> Stashed changes
         // Derivált kiértékelése
         return CatmullRomDerivative(p0, p1, p2, p3, u);
     }
@@ -266,9 +420,9 @@ public:
     // Egységvektor a pálya érintője irányában T(t)
     vec2 T(float t) {
         vec2 derivative = rDerivative(t);
-        float len = length(derivative);
+        float len = sqrt(derivative.x * derivative.x + derivative.y * derivative.y);
         if (len < 0.0001f) return vec2(1, 0); // Ha túl kicsi a hossz, vízszintes vektort adunk vissza
-        return derivative / len;
+        return vec2(derivative.x / len, derivative.y / len);
     }
     
     // Normálvektor a pálya érintőjére merőlegesen N(t)
@@ -349,7 +503,31 @@ private:
         spokes->updateGPU();
     }
     
+<<<<<<< Updated upstream
+<<<<<<< Updated upstream
     // Szükséges centripetális erő kiszámítása
+=======
+=======
+>>>>>>> Stashed changes
+    // Görbület számítása 
+    float getCurvature(float t) {
+        vec2 firstDerivative = track->rDerivative(t);
+        vec2 normalVector = track->N(t);
+        
+        // Második derivált közelítése
+        float deltaT = 0.001f;
+        vec2 nextDerivative = track->rDerivative(t + deltaT);
+        vec2 secondDerivative = (nextDerivative - firstDerivative) / deltaT;
+        
+        float firstDerivMagnitudeSq = firstDerivative.x * firstDerivative.x + firstDerivative.y * firstDerivative.y;
+        if (firstDerivMagnitudeSq < 0.0001f) return 0.0f;
+        
+        float dotProd = secondDerivative.x * normalVector.x + secondDerivative.y * normalVector.y;
+        return fabs(dotProd) / firstDerivMagnitudeSq;
+    }
+    
+    // Szükséges centripetális erő 
+>>>>>>> Stashed changes
     float calculateCentripetalForce(float param) {
         // Sebesség négyzete és a görbület szorzata
         return velocity * velocity * getCurvature(param);
@@ -362,7 +540,7 @@ private:
         
         // A nehézségi erő és a centripetális erő normálirányú komponense
         vec2 gravity(0, -g);
-        float normalGravity = dot(gravity, normal); // g negatív Y irányba mutat
+        float normalGravity = normal.x * gravity.x + normal.y * gravity.y;
         float centripetalForce = calculateCentripetalForce(param);
         
         // A pályán marad, ha a kényszererő pozitív (nyomja a pályát)
@@ -384,7 +562,15 @@ public:
         position = vec2(0, 0);
         angle = 0.0f;
         velocity = 0.0f;
+<<<<<<< Updated upstream
+<<<<<<< Updated upstream
         lambda = 1.0f;        // homogén tömegeloszlás a peremén
+=======
+        lambda = 0.5f;       
+>>>>>>> Stashed changes
+=======
+        lambda = 0.5f;       
+>>>>>>> Stashed changes
         
         // Kerék és küllők létrehozása
         createWheel(wheelRadius);
@@ -408,6 +594,8 @@ public:
         }
     }
     
+<<<<<<< Updated upstream
+<<<<<<< Updated upstream
     // Kerék állapotának frissítése
     void Animate(float dt) {
         if (state != ROLLING || track->getNumControlPoints() < 2) return;
@@ -487,15 +675,139 @@ public:
         if (firstDerivMagnitudeSq < 0.0001f) return 0.0f;
         
         return abs(dot(secondDerivative, normalVector)) / firstDerivMagnitudeSq;
+=======
+   
+   void Animate(float dt) {
+    if (state != ROLLING || track->getNumControlPoints() < 2) return;
+    
+    // Pálya érintő és normál vektorai
+    vec2 tangent = track->T(splineParam);
+    vec2 normal = track->N(splineParam);
+    
+    // Pálya aktuális pontja
+    vec2 pathPosition = track->r(splineParam);
+    
+    // Gravitáció vektor (g lefelé mutat, negatív y irányba)
+    vec2 gravity(0, -g);
+    
+    // Gravitáció komponensek az érintő és normál irányokban
+    float tangentialGravity = tangent.x * gravity.x + tangent.y * gravity.y;
+    float normalGravity = normal.x * gravity.x + normal.y * gravity.y;
+    
+    // Gyorsulás számítása (csak tangenciális komponens a haladáshoz)
+    float acceleration = tangentialGravity / (1.0f + lambda);
+    
+    // Sebesség frissítése a gyorsulás alapján
+    velocity += acceleration * dt;
+    
+    // Görbület és centripetális erő számítása
+    float curvature = getCurvature(splineParam);
+    float centripetalForce = velocity * velocity * curvature;
+    
+    // Ellenőrizzük, hogy a kerék a pályán marad-e
+    if (normalGravity + centripetalForce <= 0.0f) {
+        // A kerék leesik a pályáról
+        state = FALLEN;
+        return;
     }
+    
+    // Ellenőrizzük, hogy a kerék nem mozog-e visszafelé
+    if (velocity < 0.0f) {
+        // Visszatérés a kezdőponthoz és újraindítás
+        splineParam = 0.01f;
+        velocity = 0.0f;
+        return;
+>>>>>>> Stashed changes
+    }
+    
+=======
+   
+   void Animate(float dt) {
+    if (state != ROLLING || track->getNumControlPoints() < 2) return;
+    
+    // Pálya érintő és normál vektorai
+    vec2 tangent = track->T(splineParam);
+    vec2 normal = track->N(splineParam);
+    
+    // Pálya aktuális pontja
+    vec2 pathPosition = track->r(splineParam);
+    
+    // Gravitáció vektor (g lefelé mutat, negatív y irányba)
+    vec2 gravity(0, -g);
+    
+    // Gravitáció komponensek az érintő és normál irányokban
+    float tangentialGravity = tangent.x * gravity.x + tangent.y * gravity.y;
+    float normalGravity = normal.x * gravity.x + normal.y * gravity.y;
+    
+    // Gyorsulás számítása (csak tangenciális komponens a haladáshoz)
+    float acceleration = tangentialGravity / (1.0f + lambda);
+    
+    // Sebesség frissítése a gyorsulás alapján
+    velocity += acceleration * dt;
+    
+    // Görbület és centripetális erő számítása
+    float curvature = getCurvature(splineParam);
+    float centripetalForce = velocity * velocity * curvature;
+    
+    // Ellenőrizzük, hogy a kerék a pályán marad-e
+    if (normalGravity + centripetalForce <= 0.0f) {
+        // A kerék leesik a pályáról
+        state = FALLEN;
+        return;
+    }
+    
+    // Ellenőrizzük, hogy a kerék nem mozog-e visszafelé
+    if (velocity < 0.0f) {
+        // Visszatérés a kezdőponthoz és újraindítás
+        splineParam = 0.01f;
+        velocity = 0.0f;
+        return;
+    }
+    
+>>>>>>> Stashed changes
+    // Spline paraméter frissítése a sebesség alapján
+    vec2 derivVec = track->rDerivative(splineParam);
+    float derivLength = sqrt(derivVec.x * derivVec.x + derivVec.y * derivVec.y);
+    
+    // Biztonsági ellenőrzés a nullával való osztás elkerülésére
+    if (derivLength < 0.0001f) derivLength = 0.0001f;
+    
+    float paramStep = velocity * dt / derivLength;
+    splineParam += paramStep;
+    
+    // Ellenőrizzük, hogy a paraméter a megengedett tartományban van-e
+    float maxParam = float(track->getNumControlPoints() - 1);
+    if (splineParam >= maxParam) {
+        splineParam = 0.01f;
+        velocity = 0.0f;
+    }
+    
+    // Pozíció frissítése: a kerék középpontja a pályaponttól a normálvektor irányában van
+    position = pathPosition + normal * wheelRadius;
+    
+    // Kerék elfordulási szögének frissítése
+    float angularVelocity = -velocity / wheelRadius;
+    angle += angularVelocity * dt;
+}
+
     
     // Kerék kirajzolása
     void Draw(GPUProgram* gpuProgram, const mat4& viewMatrix) {
         if (state == WAITING || track->getNumControlPoints() < 2) return;
         
         // Modell transzformáció beállítása
-        mat4 modelMatrix = translate(mat4(1.0f), vec3(position, 0));
-        modelMatrix = rotate(modelMatrix, angle, vec3(0, 0, 1));
+        mat4 modelMatrix = mat4(1.0f);
+        modelMatrix[3][0] = position.x;
+        modelMatrix[3][1] = position.y;
+        
+        // Forgatás külön
+        mat4 rotMatrix = mat4(1.0f);
+        rotMatrix[0][0] = cos(angle);
+        rotMatrix[0][1] = sin(angle);
+        rotMatrix[1][0] = -sin(angle);
+        rotMatrix[1][1] = cos(angle);
+        
+        modelMatrix = modelMatrix * rotMatrix;
         
         // MVP mátrix beállítása
         mat4 mvpMatrix = viewMatrix * modelMatrix;
@@ -581,16 +893,14 @@ public:
     }
     
     // Idő változása
-    void onTimeElapsed(float startTime, float endTime) {
-        // Időlépés számítása
-        float dt = endTime - startTime;
-        
-        // Gondola animálása
-        gondola->Animate(dt);
-        
-        // Újrarajzolás kérése
-        refreshScreen();
+    void onTimeElapsed(float tstart, float tend) { 
+    const float dt = 0.01; 
+    for (float t = tstart; t < tend; t += dt) {
+        float Dt = fmin(dt, tend - t);
+        gondola->Animate(Dt);
     }
+    refreshScreen();
+}
     
     // Felszabadítás
     ~RollerCoasterApp() {
