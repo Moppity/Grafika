@@ -120,8 +120,8 @@ public:
 class Spline {
 private:
     std::vector<vec2> controlPoints;      
-    Geometry<vec2> *splineGeometry;       // görbe geometria
-    Geometry<vec2> *pointGeometry;        // pontok geometria
+    Geometry<vec2> *splineGeometry;       
+    Geometry<vec2> *pointGeometry;       
     
     // Catmull-Rom spline kiértékelése
     vec2 CatmullRom(const vec2& p0, const vec2& p1, const vec2& p2, const vec2& p3, float t) {
@@ -264,7 +264,6 @@ public:
             p3 = (i < (int)controlPoints.size() - 2) ? controlPoints[i+2] : p2;
         }
         
-        // Spline kiértékelése
         return CatmullRom(p0, p1, p2, p3, u);
     }
     
@@ -272,7 +271,6 @@ public:
     vec2 rDerivative(float t) {
         if (controlPoints.size() < 2) return vec2(0, 0);
         
-        // t paraméter korlátozása a [0, n-1] tartományra, ahol n a kontrollpontok száma
         if (t < 0) t = 0;
         float maxParam = (float)(controlPoints.size() - 1);
         if (t > maxParam) t = maxParam;
@@ -380,20 +378,26 @@ private:
     
     // Küllők létrehozása
     void createSpokes(float radius) {
-        spokes = new Geometry<vec2>();
-        
-        // Küllők pontjai
-        std::vector<vec2> vertices;
-        
-        vertices.push_back(vec2(0, 0));
-        vertices.push_back(vec2(radius, 0));
-        
-        vertices.push_back(vec2(0, 0));
-        vertices.push_back(vec2(0, radius));
-        
-        spokes->Vtx() = vertices;
-        spokes->updateGPU();
-    }
+    spokes = new Geometry<vec2>();
+    
+    // Küllők pontjai
+    std::vector<vec2> vertices;
+    
+    vertices.push_back(vec2(0, 0));
+    vertices.push_back(vec2(radius, 0));
+    
+    vertices.push_back(vec2(0, 0));
+    vertices.push_back(vec2(0, radius));
+    
+    vertices.push_back(vec2(0, 0));
+    vertices.push_back(vec2(-radius, 0));
+    
+    vertices.push_back(vec2(0, 0));
+    vertices.push_back(vec2(0, -radius));
+    
+    spokes->Vtx() = vertices;
+    spokes->updateGPU();
+}
     
     // Görbület számítása 
     float getCurvature(float t) {
@@ -408,7 +412,7 @@ private:
         float d2x = (nextDerivative.x - dx) / deltaT;
         float d2y = (nextDerivative.y - dy) / deltaT;
         
-        // Görbület kiszámítása: k = |x'y'' - y'x''| / (x'^2 + y'^2)^(3/2)
+        // Görbület kiszámítása
         float numerator = fabs(dx * d2y - dy * d2x);
         float denominator = pow(dx * dx + dy * dy, 1.5f);
         
@@ -448,7 +452,7 @@ public:
             vec2 normal = track->N(splineParam);
             position = pathPosition + normal * wheelRadius;
             angle = 0.0f;
-            velocity = 0.1f; // Adunk egy kis kezdősebességet, hogy biztosan elinduljon
+            velocity = 0.00f; // Adunk egy kis kezdősebességet, hogy biztosan elinduljon
         }
     }
     
@@ -465,7 +469,6 @@ public:
         // Gravitáció vektor (g lefelé mutat, negatív y irányba)
         vec2 gravity(0, -g);
         
-        // Gravitáció komponensek az érintő irányában (skaláris szorzat)
         float tangentialGravity = gravity.x * tangent.x + gravity.y * tangent.y;
         
         // Gyorsulás számítása
@@ -473,11 +476,6 @@ public:
         
         // Sebesség frissítése a gyorsulás alapján
         velocity += acceleration * dt;
-        
-        // Ha a sebesség nagyon kicsi lenne, adjunk egy kis kezdősebességet
-        if (fabs(velocity) < 0.1f) {
-            velocity = tangentialGravity > 0 ? 0.1f : -0.1f;
-        }
         
         // Spline paraméter frissítése a sebesség alapján
         vec2 derivVec = track->rDerivative(splineParam);
@@ -488,18 +486,6 @@ public:
         
         float paramStep = velocity * dt / derivLength;
         splineParam += paramStep;
-        
-        // Ellenőrizzük, hogy a paraméter a megengedett tartományban van-e
-        float maxParam = float(track->getNumControlPoints() - 1);
-        if (splineParam >= maxParam) {
-            // Ha a végére értünk, visszahelyezzük az elejére
-            splineParam = 0.01f;
-            velocity = 0.1f; // Adunk egy kis kezdősebességet
-        } else if (splineParam < 0.0f) {
-            // Ha valamiért "visszafelé" mentünk a kezdőponthoz, korrigáljuk
-            splineParam = 0.01f;
-            velocity = 0.1f; // Biztosítjuk, hogy előre haladjon
-        }
         
         // Pozíció frissítése: a kerék középpontja a pályaponttól a normálvektor irányában van
         pathPosition = track->r(splineParam);
