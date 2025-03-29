@@ -5,20 +5,20 @@ const char *vertSource = R"(
     precision highp float;
 
 	layout(location = 0) in vec2 cP;	// 0. bemeneti regiszter
-    uniform mat4 MVP;              // Model-View-Projection transzformĂĄciĂł
+    uniform mat4 MVP;              // Model-View-Projection transzformáció
 
 	void main() {
-		gl_Position = MVP * vec4(cP.x, cP.y, 0, 1); 	// transzformĂĄciĂł alkalmazĂĄsa
+		gl_Position = MVP * vec4(cP.x, cP.y, 0, 1); 	// transzformáció alkalmazása
 	}
 )";
 
-// pixel ĂĄrnyalĂł
+// pixel árnyaló
 const char *fragSource = R"(
 	#version 330
     precision highp float;
 
-	uniform vec3 color;			// konstans szĂ­n
-	out vec4 fragmentColor;		// pixel szĂ­n
+	uniform vec3 color;			// konstans szín
+	out vec4 fragmentColor;		// pixel szín
 
 	void main() {
 		fragmentColor = vec4(color, 1); // RGB -> RGBA
@@ -30,24 +30,24 @@ const float worldWidth = 20.0f;
 const float worldHeight = 20.0f; 
 const float g = 40.0f;           
 
-// gondola ĂĄllapotai
+// gondola állapotai
 enum GondolaState {
     WAITING,    
     ROLLING,    
     FALLEN      
 };
 
-// SajĂĄt mĂĄtrix inverz fĂźggvĂŠny
+// Saját mátrix inverz függvénye
 mat4 invertMatrix(const mat4& m) {
-    // EgyszerĹąsĂ­tett 4x4 mĂĄtrix inverz (csak eltolĂĄst ĂŠs skĂĄlĂĄzĂĄst kezel)
+    // egyszerűsített 4x4 mátrix inverz (eltolás és skálázásért)
     mat4 inv(1.0f);
     
-    // Az eltolĂĄs inverze
+    // Az eltolás inverze
     inv[3][0] = -m[3][0];
     inv[3][1] = -m[3][1];
     inv[3][2] = -m[3][2];
     
-    // A skĂĄlĂĄzĂĄs inverze
+    // A skálázás inverze
     if (m[0][0] != 0) inv[0][0] = 1.0f / m[0][0];
     if (m[1][1] != 0) inv[1][1] = 1.0f / m[1][1];
     if (m[2][2] != 0) inv[2][2] = 1.0f / m[2][2];
@@ -59,28 +59,28 @@ class Camera {
 private:
     vec2 center;         
     float width, height; 
-    mat4 viewMatrix;     // view transzformĂĄciĂłs mĂĄtrix
-    mat4 projMatrix;     // projekciĂłs transzformĂĄciĂłs mĂĄtrix
-    mat4 invViewMatrix;  // view mĂĄtrix inverze
-    mat4 invProjMatrix;  // projekciĂłs mĂĄtrix inverze
-    mat4 MVPMatrix;      // model-view-projection mĂĄtrix
+    mat4 viewMatrix;     
+    mat4 projMatrix;     
+    mat4 invViewMatrix;  // view mátrix inverze
+    mat4 invProjMatrix;  
+    mat4 MVPMatrix;      // model-view-projection mátrix
     
     void updateMatrices() {
-        // View mĂĄtrix szĂĄmĂ­tĂĄsa - eltolĂĄs a vilĂĄg kĂśzĂŠppontjĂĄba
+        // View mátrix számítása - eltolás a világ középpontjába
         viewMatrix = mat4(1.0f);
         viewMatrix[3][0] = -center.x;
         viewMatrix[3][1] = -center.y;
         
-        // ProjekciĂłs mĂĄtrix - skĂĄlĂĄzĂĄs a [-1,1] tartomĂĄnyba
+        // Projekciós mátrix - skálázás a [-1,1] tartományba
         projMatrix = mat4(1.0f);
         projMatrix[0][0] = 2.0f/width;
         projMatrix[1][1] = 2.0f/height;
         
-        // Inverz mĂĄtrixok szĂĄmĂ­tĂĄsa
+        // Inverz mátrixok számítása
         invViewMatrix = invertMatrix(viewMatrix);
         invProjMatrix = invertMatrix(projMatrix);
         
-        // Teljes MVP mĂĄtrix szĂĄmĂ­tĂĄsa
+        // Teljes MVP mátrix számítása
         MVPMatrix = projMatrix * viewMatrix;
     }
     
@@ -90,28 +90,28 @@ public:
         updateMatrices();
     }
     
-    // VilĂĄgkoordinĂĄtĂĄk ĂĄtvĂĄltĂĄsa kĂŠpernyĹkoordinĂĄtĂĄkra
+    // Világkoordináták átváltása képernyőkoordinátákra
     vec2 worldToScreen(const vec2& worldPos) {
         vec4 clipPos = MVPMatrix * vec4(worldPos.x, worldPos.y, 0.0f, 1.0f);
         return vec2(clipPos.x, clipPos.y);
     }
     
-    // KĂŠpernyĹkoordinĂĄtĂĄk ĂĄtvĂĄltĂĄsa vilĂĄgkoordinĂĄtĂĄkra
+    // Képernyőkoordináták átváltása világkoordinátákra
     vec2 screenToWorld(int screenX, int screenY) {
-        // NormalizĂĄlt eszkĂśzkoordinĂĄtĂĄk szĂĄmĂ­tĂĄsa
+        // Normalizált eszközkoordináták számítása
         float ndcX = 2.0f * screenX / winWidth - 1.0f;
         float ndcY = 1.0f - 2.0f * screenY / winHeight;
         
-        // HomogĂŠn koordinĂĄtĂĄk szĂĄmĂ­tĂĄsa
+        // Homogén koordináták számítása
         vec4 clipPos = vec4(ndcX, ndcY, 0.0f, 1.0f);
         
-        // VisszatranszformĂĄlĂĄs vilĂĄgkoordinĂĄtĂĄkba
+        // Visszatranszformálás világkoordinátákba
         vec4 worldPos = invProjMatrix * invViewMatrix * clipPos;
         
         return vec2(worldPos.x, worldPos.y);
     }
     
-    // MVP mĂĄtrix lekĂŠrdezĂŠse
+    // MVP mátrix lekérdezése
     const mat4& getMVP() const {
         return MVPMatrix;
     }
@@ -120,15 +120,15 @@ public:
 class Spline {
 private:
     std::vector<vec2> controlPoints;      
-    Geometry<vec2> *splineGeometry;       // gĂśrbe geometria
+    Geometry<vec2> *splineGeometry;       // görbe geometria
     Geometry<vec2> *pointGeometry;        // pontok geometria
     
-    // Catmull-Rom spline kiĂŠrtĂŠkelĂŠse
+    // Catmull-Rom spline kiértékelése
     vec2 CatmullRom(const vec2& p0, const vec2& p1, const vec2& p2, const vec2& p3, float t) {
         float t2 = t * t;
         float t3 = t2 * t;
         
-        // Catmull-Rom mĂĄtrix
+        // Catmull-Rom mátrix
         float h1 = -0.5f * t3 + t2 - 0.5f * t;
         float h2 = 1.5f * t3 - 2.5f * t2 + 1.0f;
         float h3 = -1.5f * t3 + 2.0f * t2 + 0.5f * t;
@@ -137,11 +137,11 @@ private:
         return h1 * p0 + h2 * p1 + h3 * p2 + h4 * p3;
     }
     
-    // Catmull-Rom spline derivĂĄltjĂĄnak kiĂŠrtĂŠkelĂŠse
+    // Catmull-Rom spline deriváltjának kiértékelése
     vec2 CatmullRomDerivative(const vec2& p0, const vec2& p1, const vec2& p2, const vec2& p3, float t) {
         float t2 = t * t;
         
-        // A Catmull-Rom derivĂĄltja
+        // A Catmull-Rom deriváltja
         float dh1 = -1.5f * t2 + 2.0f * t - 0.5f;
         float dh2 = 4.5f * t2 - 5.0f * t;
         float dh3 = -4.5f * t2 + 4.0f * t + 0.5f;
@@ -150,29 +150,29 @@ private:
         return dh1 * p0 + dh2 * p1 + dh3 * p2 + dh4 * p3;
     }
     
-    // Geometria frissĂ­tĂŠse
+    // Geometria frissítése
     void updateGeometry() {
         if (controlPoints.size() < 2) return;
         
         std::vector<vec2> curvePoints;
         
-        // Ha van legalĂĄbb 2 kontrollpont, gĂśrbe generĂĄlĂĄsa
+        // Ha van legalább 2 kontrollpont, görbe generálása
         if (controlPoints.size() >= 2) {
-            // 100 pontra felosztjuk a gĂśrbĂŠt
+            // 100 pontra felosztjuk a görbét
             const int segments = 100;
             
             for (size_t i = 0; i < controlPoints.size() - 1; i++) {
-                // MeghatĂĄrozzuk a 4 kontrollpontot a szakaszhoz
+                // Meghatározzuk a 4 kontrollpontot a szakaszhoz
                 vec2 p0 = (i > 0) ? controlPoints[i-1] : controlPoints[i];
                 vec2 p1 = controlPoints[i];
                 vec2 p2 = controlPoints[i+1];
                 vec2 p3 = (i < controlPoints.size() - 2) ? controlPoints[i+2] : controlPoints[i+1];
                 
-                // A kezdĹ ĂŠs vĂŠgpontokban nulla sebessĂŠgvektor (Hermite feltĂŠtel)
+                // A kezdő és végpontokban nulla sebességvektor (Hermite feltétel)
                 if (i == 0) p0 = p1 - (p2 - p1) * 0.01f;
                 if (i == controlPoints.size() - 2) p3 = p2 + (p2 - p1) * 0.01f;
                 
-                // Szakasz felosztĂĄsa
+                // Szakasz felosztása
                 for (int j = 0; j <= segments; j++) {
                     float t = (float)j / segments;
                     curvePoints.push_back(CatmullRom(p0, p1, p2, p3, t));
@@ -180,7 +180,7 @@ private:
             }
         }
         
-        // GĂśrbe geometria frissĂ­tĂŠse
+        // Görbe geometria frissítése
         if (splineGeometry) {
             delete splineGeometry;
         }
@@ -189,7 +189,7 @@ private:
         splineGeometry->Vtx() = curvePoints;
         splineGeometry->updateGPU();
         
-        // Kontrollpontok geometria frissĂ­tĂŠse
+        // Kontrollpontok geometria frissítése
         if (pointGeometry) {
             delete pointGeometry;
         }
@@ -210,41 +210,41 @@ public:
         if (pointGeometry) delete pointGeometry;
     }
     
-    // Ăj kontrollpont hozzĂĄadĂĄsa
+    // Új kontrollpont hozzáadása
     void addControlPoint(vec2 point) {
         controlPoints.push_back(point);
         updateGeometry();
     }
     
-    // Kontrollpontok szĂĄmĂĄnak lekĂŠrdezĂŠse
+    // Kontrollpontok számának lekérdezése
     size_t getNumControlPoints() const {
         return controlPoints.size();
     }
     
-    // GĂśrbe paramĂŠteres egyenlete: r(t)
+    // Görbe paraméteres egyenlete: r(t)
     vec2 r(float t) {
         if (controlPoints.size() < 2) return vec2(0, 0);
         
-        // t paramĂŠter korlĂĄtozĂĄsa a [0, n-1] tartomĂĄnyra, ahol n a kontrollpontok szĂĄma
+        // t paraméter korlátozása a [0, n-1] tartományra, ahol n a kontrollpontok száma
         if (t < 0) t = 0;
         float maxParam = (float)(controlPoints.size() - 1);
         if (t > maxParam) t = maxParam;
         
-        // EgĂŠsz ĂŠs tĂśrt rĂŠsz kiszĂĄmĂ­tĂĄsa
+        // Egész és tört rész kiszámítása
         int i = (int)t;
         float u = t - i;
         
-        // Kontrollpontok kivĂĄlasztĂĄsa
+        // Kontrollpontok kiválasztása
         vec2 p0, p1, p2, p3;
         
-        // Az indexek ellenĹrzĂŠsĂŠvel
+        // Az indexek ellenőrzésével
         if (i == 0) {
             p0 = controlPoints[0];
             p1 = controlPoints[0];
             p2 = (controlPoints.size() > 1) ? controlPoints[1] : controlPoints[0];
             p3 = (controlPoints.size() > 2) ? controlPoints[2] : p2;
             
-            // KezdĹponti derivĂĄlt nulla
+            // Kezdőponti derivált speciális kezelése
             p0 = p1 - (p2 - p1) * 0.01f;
         }
         else if (i >= (int)controlPoints.size() - 1) {
@@ -254,7 +254,7 @@ public:
             p2 = controlPoints[n-1];
             p3 = controlPoints[n-1];
             
-            // VĂŠgponti derivĂĄlt nulla
+            // Végponti derivált speciális kezelése
             p3 = p2 + (p2 - p1) * 0.01f;
         }
         else {
@@ -264,34 +264,34 @@ public:
             p3 = (i < (int)controlPoints.size() - 2) ? controlPoints[i+2] : p2;
         }
         
-        // Spline kiĂŠrtĂŠkelĂŠse
+        // Spline kiértékelése
         return CatmullRom(p0, p1, p2, p3, u);
     }
     
-    // GĂśrbe derivĂĄltja
+    // Görbe deriváltja
     vec2 rDerivative(float t) {
         if (controlPoints.size() < 2) return vec2(0, 0);
         
-        // t paramĂŠter korlĂĄtozĂĄsa a [0, n-1] tartomĂĄnyra, ahol n a kontrollpontok szĂĄma
+        // t paraméter korlátozása a [0, n-1] tartományra, ahol n a kontrollpontok száma
         if (t < 0) t = 0;
         float maxParam = (float)(controlPoints.size() - 1);
         if (t > maxParam) t = maxParam;
         
-        // EgĂŠsz ĂŠs tĂśrt rĂŠsz kiszĂĄmĂ­tĂĄsa
+        // Egész és tört rész kiszámítása
         int i = (int)t;
         float u = t - i;
         
-        // Kontrollpontok kivĂĄlasztĂĄsa
+        // Kontrollpontok kiválasztása
         vec2 p0, p1, p2, p3;
         
-        // Az indexek ellenĹrzĂŠsĂŠvel
+        // Az indexek ellenőrzésével
         if (i == 0) {
             p0 = controlPoints[0];
             p1 = controlPoints[0];
             p2 = (controlPoints.size() > 1) ? controlPoints[1] : controlPoints[0];
             p3 = (controlPoints.size() > 2) ? controlPoints[2] : p2;
             
-            // KezdĹponti derivĂĄlt nulla
+            // Kezdőponti derivált speciális kezelése
             p0 = p1 - (p2 - p1) * 0.01f;
         }
         else if (i >= (int)controlPoints.size() - 1) {
@@ -301,7 +301,7 @@ public:
             p2 = controlPoints[n-1];
             p3 = controlPoints[n-1];
             
-            // VĂŠgponti derivĂĄlt nulla
+            // Végponti derivált speciális kezelése
             p3 = p2 + (p2 - p1) * 0.01f;
         }
         else {
@@ -311,34 +311,34 @@ public:
             p3 = (i < (int)controlPoints.size() - 2) ? controlPoints[i+2] : p2;
         }
         
-        // DerivĂĄlt kiĂŠrtĂŠkelĂŠse
+        // Derivált kiértékelése
         return CatmullRomDerivative(p0, p1, p2, p3, u);
     }
     
-    // EgysĂŠgvektor a pĂĄlya ĂŠrintĹje irĂĄnyĂĄban 
+    // Egységvektor a pálya érintője irányában 
     vec2 T(float t) {
         vec2 derivative = rDerivative(t);
-        float len = sqrt(derivative.x * derivative.x + derivative.y * derivative.y);
-        if (len < 0.0001f) return vec2(1, 0); // Ha tĂşl kicsi a hossz, vĂ­zszintes vektort adunk vissza
+        float len = length(derivative);
+        if (len < 0.0001f) return vec2(1, 0); // Ha túl kicsi a hossz, vízszintes vektort adunk vissza
         return vec2(derivative.x / len, derivative.y / len);
     }
     
-    // NormĂĄlvektor a pĂĄlya ĂŠrintĹjĂŠre merĹlegesen 
+    // Normálvektor a pálya érintőjére merőlegesen 
     vec2 N(float t) {
         vec2 tangent = T(t);
-        return vec2(-tangent.y, tangent.x); // 90 fokos elforgatĂĄs
+        return vec2(-tangent.y, tangent.x); // 90 fokos elforgatás
     }
     
    
     void Draw(GPUProgram* gpuProgram) {
-        // Ha nincs elĂŠg pont, nem rajzolunk
+        // Ha nincs elég pont, nem rajzolunk
         if (controlPoints.size() < 2) return;
         
-        // GĂśrbe kirajzolĂĄsa sĂĄrga szĂ­nnel
+        // Görbe kirajzolása sárga színnel
         glLineWidth(3.0f);
         splineGeometry->Draw(gpuProgram, GL_LINE_STRIP, vec3(1.0f, 1.0f, 0.0f));
         
-        // Kontrollpontok kirajzolĂĄsa piros nĂŠgyzetkĂŠnt
+        // Kontrollpontok kirajzolása piros négyzetként
         glPointSize(10.0f);
         pointGeometry->Draw(gpuProgram, GL_POINTS, vec3(1.0f, 0.0f, 0.0f));
     }
@@ -351,39 +351,39 @@ private:
     Spline *track;                
     
     GondolaState state;        
-    float splineParam;           // pĂĄlya paramĂŠter (t)
+    float splineParam;           // pálya paraméter (t)
     float wheelRadius;           
     vec2 position;               
     float angle;                 
     float velocity;              
-    float lambda;                // alaktĂŠnyezĹ
+    float lambda;                // alaktényező
     
     void createWheel(float radius) {
         wheel = new Geometry<vec2>();
         
-        // KĂśr lĂŠtrehozĂĄsa
+        // Kör létrehozása
         const int segments = 36;
         std::vector<vec2> vertices;
         
-        // KĂśzĂŠppont
+        // Középpont
         vertices.push_back(vec2(0, 0));
         
-        // KĂśrvonal pontjai
+        // Körvonal pontjai
         for (int i = 0; i <= segments; i++) {
             float phi = i * 2 * M_PI / segments;
             vertices.push_back(vec2(radius * cos(phi), radius * sin(phi)));
         }
         
-        // Geometria beĂĄllĂ­tĂĄsa
+        // Geometria beállítása
         wheel->Vtx() = vertices;
         wheel->updateGPU();
     }
     
-    // KĂźllĹk lĂŠtrehozĂĄsa
+    // Küllők létrehozása
     void createSpokes(float radius) {
         spokes = new Geometry<vec2>();
         
-        // KĂźllĹk pontjai
+        // Küllők pontjai
         std::vector<vec2> vertices;
         
         
@@ -398,29 +398,33 @@ private:
         spokes->updateGPU();
     }
     
-    // GĂśrbĂźlet szĂĄmĂ­tĂĄsa 
+    // Görbület számítása 
     float getCurvature(float t) {
+        // Első és második deriváltak kiszámítása
         vec2 firstDerivative = track->rDerivative(t);
-        vec2 normalVector = track->N(t);
+        float dx = firstDerivative.x;
+        float dy = firstDerivative.y;
         
-        // MĂĄsodik derivĂĄlt kĂśzelĂ­tĂŠse
+        // Második derivált közelítése
         float deltaT = 0.001f;
         vec2 nextDerivative = track->rDerivative(t + deltaT);
-        vec2 secondDerivative = (nextDerivative - firstDerivative) / deltaT;
+        float d2x = (nextDerivative.x - dx) / deltaT;
+        float d2y = (nextDerivative.y - dy) / deltaT;
         
-        float firstDerivMagnitudeSq = firstDerivative.x * firstDerivative.x + firstDerivative.y * firstDerivative.y;
-        if (firstDerivMagnitudeSq < 0.0001f) return 0.0f;
+        float numerator = fabs(dx * d2y - dy * d2x);
+        float denominator = pow(dx * dx + dy * dy, 1.5f);
         
-        float dotProd = secondDerivative.x * normalVector.x + secondDerivative.y * normalVector.y;
-        return fabs(dotProd) / firstDerivMagnitudeSq;
+        if (denominator < 0.0001f) return 0.0f;
+        
+        return numerator / denominator;
     }
     
-    // SzĂźksĂŠges centripetĂĄlis erĹ 
+    // Szükséges centripetális erő 
     float calculateCentripetalForce(float param) {
         return velocity * velocity * getCurvature(param);
     }
     
-    // KerĂŠk a pĂĄlyĂĄn van-e
+    // Kerék a pályán van-e
     bool staysOnTrack(float param) {
        
         vec2 normal = track->N(param);
@@ -430,13 +434,8 @@ private:
         float normalGravity = normal.x * gravity.x + normal.y * gravity.y;
         float centripetalForce = calculateCentripetalForce(param);
         
-        // A pĂĄlyĂĄn marad, ha a kĂŠnyszererĹ pozitĂ­v (nyomja a pĂĄlyĂĄt)
+        // A pályán marad, ha a kényszererő pozitív (nyomja a pályát)
         return (normalGravity + centripetalForce) > 0;
-    }
-    
-    // EllenĹrizzĂźk, hogy a kerĂŠk nem mozog-e visszafelĂŠ
-    bool isMovingBackwards() {
-        return velocity < 0;
     }
     
 public:
@@ -449,7 +448,7 @@ public:
         velocity = 0.0f;
         lambda = 0.5f;       
         
-        // KerĂŠk ĂŠs kĂźllĹk lĂŠtrehozĂĄsa
+        // Kerék és küllők létrehozása
         createWheel(wheelRadius);
         createSpokes(wheelRadius);
     }
@@ -459,11 +458,11 @@ public:
         delete spokes;
     }
     
-    // KerĂŠk indĂ­tĂĄsa
+    // Kerék indítása
     void Start() {
         if (state == WAITING && track->getNumControlPoints() >= 2) {
             state = ROLLING;
-            // Mindig a 0.01 paramĂŠterĹą pontnĂĄl indĂ­tunk
+            // Mindig a 0.01 paraméterű pontnál indítunk
             splineParam = 0.01f;
             position = track->r(splineParam);
             angle = 0.0f;
@@ -471,85 +470,84 @@ public:
         }
     }
     
-   
    void Animate(float dt) {
-    if (state != ROLLING || track->getNumControlPoints() < 2) return;
-    
-    // PĂĄlya ĂŠrintĹ ĂŠs normĂĄl vektorai
-    vec2 tangent = track->T(splineParam);
-    vec2 normal = track->N(splineParam);
-    
-    // PĂĄlya aktuĂĄlis pontja
-    vec2 pathPosition = track->r(splineParam);
-    
-    // GravitĂĄciĂł vektor (g lefelĂŠ mutat, negatĂ­v y irĂĄnyba)
-    vec2 gravity(0, -g);
-    
-    // GravitĂĄciĂł komponensek az ĂŠrintĹ ĂŠs normĂĄl irĂĄnyokban
-    float tangentialGravity = tangent.x * gravity.x + tangent.y * gravity.y;
-    float normalGravity = normal.x * gravity.x + normal.y * gravity.y;
-    
-    // GyorsulĂĄs szĂĄmĂ­tĂĄsa (csak tangenciĂĄlis komponens a haladĂĄshoz)
-    float acceleration = tangentialGravity / (1.0f + lambda);
-    
-    // SebessĂŠg frissĂ­tĂŠse a gyorsulĂĄs alapjĂĄn
-    velocity += acceleration * dt;
-    
-    // GĂśrbĂźlet ĂŠs centripetĂĄlis erĹ szĂĄmĂ­tĂĄsa
-    float curvature = getCurvature(splineParam);
-    float centripetalForce = velocity * velocity * curvature;
-    
-    // EllenĹrizzĂźk, hogy a kerĂŠk a pĂĄlyĂĄn marad-e
-    if (normalGravity + centripetalForce <= 0.0f) {
-        // A kerĂŠk leesik a pĂĄlyĂĄrĂłl
-        state = FALLEN;
-        return;
+        if (state != ROLLING || track->getNumControlPoints() < 2) return;
+        
+        // Pálya érintő és normál vektorai
+        vec2 tangent = track->T(splineParam);
+        vec2 normal = track->N(splineParam);
+        
+        // Pálya aktuális pontja
+        vec2 pathPosition = track->r(splineParam);
+        
+        // Gravitáció vektor
+        vec2 gravity(0, -g);
+        
+        // Gravitáció komponensek az érintő és normál irányokban
+        float tangentialGravity = tangent.x * gravity.x + tangent.y * gravity.y;
+        float normalGravity = normal.x * gravity.x + normal.y * gravity.y;
+        
+        float acceleration = tangentialGravity;
+        
+        // Sebesség frissítése a gyorsulás alapján
+        velocity += acceleration * dt;
+        
+        // Görbület és centripetális erő számítása
+        float curvature = getCurvature(splineParam);
+        float centripetalForce = velocity * velocity * curvature;
+        
+        // Ellenőrizzük, hogy a kerék a pályán marad-e
+        if (normalGravity + centripetalForce <= 0.0f) {
+            // A kerék leesik a pályáról
+            state = FALLEN;
+            return;
+        }
+        
+        // Ellenőrizzük, hogy a kerék nem mozog-e visszafelé
+        if (velocity < 0.0f && splineParam <= 0.01f) {
+            // Ha a kezdőponthoz közel vagyunk és visszafelé mozgunk, akkor megállunk
+            velocity = 0.0f;
+            return;
+        }
+        
+        // Spline paraméter frissítése a sebesség alapján
+        vec2 derivVec = track->rDerivative(splineParam);
+        float derivLength = length(derivVec);
+        
+        // Biztonsági ellenőrzés a nullával való osztás elkerülésére
+        if (derivLength < 0.0001f) derivLength = 0.0001f;
+        
+        float paramStep = velocity * dt / derivLength;
+        splineParam += paramStep;
+        
+        // Ellenőrizzük, hogy a paraméter a megengedett tartományban van-e
+        float maxParam = float(track->getNumControlPoints() - 1);
+        if (splineParam >= maxParam) {
+            splineParam = 0.01f;
+            velocity = 0.0f;
+        } else if (splineParam < 0.0f) {
+            splineParam = 0.0f;
+            velocity = 0.0f;
+        }
+        
+        // Pozíció frissítése: a kerék középpontja a pályaponttól a normálvektor irányában van
+        position = pathPosition + normal * wheelRadius;
+        
+        // Kerék elfordulási szögének frissítése
+        float angularVelocity = -velocity / wheelRadius;
+        angle += angularVelocity * dt;
     }
     
-    // EllenĹrizzĂźk, hogy a kerĂŠk nem mozog-e visszafelĂŠ
-    if (velocity < 0.0f) {
-        // VisszatĂŠrĂŠs a kezdĹponthoz ĂŠs ĂşjraindĂ­tĂĄs
-        splineParam = 0.01f;
-        velocity = 0.0f;
-        return;
-    }
-    
-    // Spline paramĂŠter frissĂ­tĂŠse a sebessĂŠg alapjĂĄn
-    vec2 derivVec = track->rDerivative(splineParam);
-    float derivLength = sqrt(derivVec.x * derivVec.x + derivVec.y * derivVec.y);
-    
-    // BiztonsĂĄgi ellenĹrzĂŠs a nullĂĄval valĂł osztĂĄs elkerĂźlĂŠsĂŠre
-    if (derivLength < 0.0001f) derivLength = 0.0001f;
-    
-    float paramStep = velocity * dt / derivLength;
-    splineParam += paramStep;
-    
-    // EllenĹrizzĂźk, hogy a paramĂŠter a megengedett tartomĂĄnyban van-e
-    float maxParam = float(track->getNumControlPoints() - 1);
-    if (splineParam >= maxParam) {
-        splineParam = 0.01f;
-        velocity = 0.0f;
-    }
-    
-    // PozĂ­ciĂł frissĂ­tĂŠse: a kerĂŠk kĂśzĂŠppontja a pĂĄlyaponttĂłl a normĂĄlvektor irĂĄnyĂĄban van
-    position = pathPosition + normal * wheelRadius;
-    
-    // KerĂŠk elfordulĂĄsi szĂśgĂŠnek frissĂ­tĂŠse
-    float angularVelocity = -velocity / wheelRadius;
-    angle += angularVelocity * dt;
-}
-
-    
-    // KerĂŠk kirajzolĂĄsa
+    // Kerék kirajzolása
     void Draw(GPUProgram* gpuProgram, const mat4& viewMatrix) {
         if (state == WAITING || track->getNumControlPoints() < 2) return;
         
-        // Modell transzformĂĄciĂł beĂĄllĂ­tĂĄsa
+        // Modell transzformáció beállítása
         mat4 modelMatrix = mat4(1.0f);
         modelMatrix[3][0] = position.x;
         modelMatrix[3][1] = position.y;
         
-        // ForgatĂĄs kĂźlĂśn
+        // Forgatás külön
         mat4 rotMatrix = mat4(1.0f);
         rotMatrix[0][0] = cos(angle);
         rotMatrix[0][1] = sin(angle);
@@ -558,23 +556,23 @@ public:
         
         modelMatrix = modelMatrix * rotMatrix;
         
-        // MVP mĂĄtrix beĂĄllĂ­tĂĄsa
+        // MVP mátrix beállítása
         mat4 mvpMatrix = viewMatrix * modelMatrix;
         gpuProgram->setUniform(mvpMatrix, "MVP");
         
-        // KerĂŠk kirajzolĂĄsa
+        // Kerék kirajzolása
         glPointSize(1.0f);
         wheel->Draw(gpuProgram, GL_TRIANGLE_FAN, vec3(0, 0, 1));
         
-        // KĂśrvonal kirajzolĂĄsa
+        // Körvonal kirajzolása
         glLineWidth(2.0f);
         wheel->Draw(gpuProgram, GL_LINE_LOOP, vec3(1, 1, 1)); 
         
-        // KĂźllĹk kirajzolĂĄsa
+        // Küllők kirajzolása
         spokes->Draw(gpuProgram, GL_LINES, vec3(1, 1, 1));
     }
     
-    // Ăllapot lekĂŠrdezĂŠse
+    // Állapot lekérdezése
     GondolaState getState() const {
         return state;
     }
@@ -598,23 +596,23 @@ public:
         gpuProgram = new GPUProgram(vertSource, fragSource);
     }
 
-    // Ablak ĂşjrarajzolĂĄs
+    // Ablak újrarajzolás
     void onDisplay() {
         glClearColor(0, 0, 0, 0);     
         glClear(GL_COLOR_BUFFER_BIT); 
         glViewport(0, 0, winWidth, winHeight);
         
-        // MVP mĂĄtrix beĂĄllĂ­tĂĄsa
+        // MVP mátrix beállítása
         gpuProgram->setUniform(camera->getMVP(), "MVP");
         
-        // PĂĄlya kirajzolĂĄsa
+        // Pálya kirajzolása
         track->Draw(gpuProgram);
         
-        // Gondola kirajzolĂĄsa
+        // Gondola kirajzolása
         gondola->Draw(gpuProgram, camera->getMVP());
     }
     
-    // BillentyĹązet kezelĂŠse
+    // Billentyűzet kezelése
     void onKeyboard(int key) {
         if (key == ' ') { // SPACE
             gondola->Start(); 
@@ -622,31 +620,31 @@ public:
         }
     }
     
-    // EgĂŠr lenyomĂĄs kezelĂŠse
+    // Egér lenyomás kezelése
     void onMousePressed(MouseButton button, int pX, int pY) {
         if (button == MOUSE_LEFT) {
-            // KĂŠpernyĹ koordinĂĄtĂĄk ĂĄtvĂĄltĂĄsa vilĂĄgkoordinĂĄtĂĄkba
+            // Képernyő koordináták átváltása világkoordinátákba
             vec2 worldPos = camera->screenToWorld(pX, pY);
             
-            // Ăj kontrollpont hozzĂĄadĂĄsa
+            // Új kontrollpont hozzáadása
             track->addControlPoint(worldPos);
             
-            // ĂjrarajzolĂĄs kĂŠrĂŠse
+            // Újrarajzolás kérése
             refreshScreen();
         }
     }
     
-    // IdĹ vĂĄltozĂĄsa
+    // Idő változása
     void onTimeElapsed(float tstart, float tend) { 
-    const float dt = 0.01; 
-    for (float t = tstart; t < tend; t += dt) {
-        float Dt = fmin(dt, tend - t);
-        gondola->Animate(Dt);
+        const float dt = 0.01; 
+        for (float t = tstart; t < tend; t += dt) {
+            float Dt = fmin(dt, tend - t);
+            gondola->Animate(Dt);
+        }
+        refreshScreen();
     }
-    refreshScreen();
-}
     
-    // FelszabadĂ­tĂĄs
+    // Felszabadítás
     ~RollerCoasterApp() {
         delete track;
         delete gpuProgram;
