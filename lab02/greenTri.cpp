@@ -425,7 +425,7 @@ private:
 public:
     Gondola(Spline *trackRef) : track(trackRef) {
         state = WAITING;
-        splineParam = 0.01f;  
+        splineParam = 0.0f;  
         wheelRadius = 1.0f;   
         position = vec2(0, 0);
         angle = 0.0f;
@@ -443,19 +443,20 @@ public:
     
     // Kerék indítása
     void Start() {
-        if (state == WAITING && track->getNumControlPoints() >= 2) {
-            state = ROLLING;
-            // A pálya első pontján indítjuk a kereket
-            splineParam = 0.01f;
-            // Pálya helyzetének és normálvektorának számítása
-            vec2 pathPosition = track->r(splineParam);
-            vec2 normal = track->N(splineParam);
-            // Kerék pozíciója: a kerék alja a pályán
-            position = pathPosition + normal * wheelRadius;
-            angle = 0.0f;
-            velocity = 0.0f; // Nulláról indul
-        }
+    if (state == WAITING && track->getNumControlPoints() >= 2) {
+        state = ROLLING;
+        // A pálya első pontján indítjuk a kereket
+        splineParam = 0.0f;
+        // Pozíció számítása
+        vec2 pathPosition = track->r(splineParam);
+        vec2 normal = track->N(splineParam);
+        position = pathPosition + normal * wheelRadius; // Ez marad az eredeti
+        angle = 0.0f;
+        velocity = 0.0f;
     }
+}
+
+
     
     void Animate(float dt) {
     if (state != ROLLING || track->getNumControlPoints() < 2) return;
@@ -464,7 +465,6 @@ public:
     vec2 tangent = track->T(splineParam);
     vec2 normal = track->N(splineParam);
 
-    // Pálya aktuális pontja
     vec2 pathPosition = track->r(splineParam);
 
     // Gravitáció vektor 
@@ -476,46 +476,31 @@ public:
     // Gyorsulás számítása
     float acceleration = tangentialGravity;
 
-    // Sebesség frissítése
     velocity += acceleration * dt;
 
-    // Ellenőrizzük, hogy a kerék nem indul-e visszafelé
-    if (velocity < 0) {
-        // Visszahelyezés a kezdőponthoz
-        splineParam = 0.01f;
-        pathPosition = track->r(splineParam);
-        normal = track->N(splineParam);
-        position = pathPosition + normal * wheelRadius;
-        velocity = 0.0f;
-        angle = 0.0f;
-        return;
-    }
-
-    // Spline paraméter frissítése
+    
+    // Módosított paraméterlépés számítás
     vec2 derivVec = track->rDerivative(splineParam);
     float derivLength = sqrt(derivVec.x * derivVec.x + derivVec.y * derivVec.y);
     
-    // Biztonsági ellenőrzés
     if (derivLength < 0.0001f) derivLength = 0.0001f;
     
-    float paramStep = velocity * dt / derivLength;
+    float speedScaleFactor = 0.5f; 
+    float paramStep = velocity * dt * speedScaleFactor / derivLength;
     splineParam += paramStep;
     
-    // Ellenőrizze, hogy a kerék nem hagyja-e el a pályát
     if (splineParam >= track->getNumControlPoints() - 1) {
-        state = FALLEN;  // vagy más jelzés, hogy leesett
+        state = FALLEN;
         return;
     }
-    
     
     pathPosition = track->r(splineParam);
     normal = track->N(splineParam);
     position = pathPosition + normal * wheelRadius;
     
-  
-    float angularVelocity = velocity / wheelRadius;
+    float angularVelocity = -velocity / wheelRadius;
     angle += angularVelocity * dt;
-    }
+}
     
     // Kerék kirajzolása
     void Draw(GPUProgram* gpuProgram, const mat4& viewMatrix) {
@@ -565,14 +550,14 @@ class RollerCoasterApp : public glApp {
 public:
     RollerCoasterApp() : glApp("Lab02") {}
 
-    void onInitialization() {
-        camera = new Camera(vec2(0.0f, 0.0f), worldWidth, worldHeight);
-        
-        track = new Spline();
-        
-        gondola = new Gondola(track);
+   void onInitialization() {
+    camera = new Camera(vec2(0.0f, 0.0f), worldWidth, worldHeight);
     
-        gpuProgram = new GPUProgram(vertSource, fragSource);
+    track = new Spline();
+    
+    gondola = new Gondola(track);
+    
+    gpuProgram = new GPUProgram(vertSource, fragSource);
     }
 
     // Ablak újrarajzolás
