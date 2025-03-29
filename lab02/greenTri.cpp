@@ -448,7 +448,7 @@ public:
             vec2 normal = track->N(splineParam);
             position = pathPosition + normal * wheelRadius;
             angle = 0.0f;
-            velocity = 0.0f; 
+            velocity = 0.1f; // Adunk egy kis kezdősebességet, hogy biztosan elinduljon
         }
     }
     
@@ -465,25 +465,18 @@ public:
         // Gravitáció vektor (g lefelé mutat, negatív y irányba)
         vec2 gravity(0, -g);
         
-        // Gravitáció komponensek az érintő és normál irányokban (skaláris szorzat)
-        float tangentialGravity = tangent.x * gravity.x + tangent.y * gravity.y;
-        float normalGravity = normal.x * gravity.x + normal.y * gravity.y;
+        // Gravitáció komponensek az érintő irányában (skaláris szorzat)
+        float tangentialGravity = gravity.x * tangent.x + gravity.y * tangent.y;
         
-        // Gyorsulás számítása (csak tangenciális komponens a haladáshoz)
+        // Gyorsulás számítása
         float acceleration = tangentialGravity;
         
         // Sebesség frissítése a gyorsulás alapján
         velocity += acceleration * dt;
         
-        // Görbület és centripetális erő számítása
-        float curvature = getCurvature(splineParam);
-        float centripetalForce = velocity * velocity * curvature;
-        
-        // Ellenőrizzük, hogy a kerék a pályán marad-e
-        if (normalGravity + centripetalForce <= 0.0f) {
-            // A kerék leesik a pályáról
-            state = FALLEN;
-            return;
+        // Ha a sebesség nagyon kicsi lenne, adjunk egy kis kezdősebességet
+        if (fabs(velocity) < 0.1f) {
+            velocity = tangentialGravity > 0 ? 0.1f : -0.1f;
         }
         
         // Spline paraméter frissítése a sebesség alapján
@@ -501,7 +494,11 @@ public:
         if (splineParam >= maxParam) {
             // Ha a végére értünk, visszahelyezzük az elejére
             splineParam = 0.01f;
-            velocity = 0.0f;
+            velocity = 0.1f; // Adunk egy kis kezdősebességet
+        } else if (splineParam < 0.0f) {
+            // Ha valamiért "visszafelé" mentünk a kezdőponthoz, korrigáljuk
+            splineParam = 0.01f;
+            velocity = 0.1f; // Biztosítjuk, hogy előre haladjon
         }
         
         // Pozíció frissítése: a kerék középpontja a pályaponttól a normálvektor irányában van
