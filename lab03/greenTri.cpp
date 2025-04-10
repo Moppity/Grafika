@@ -2,6 +2,120 @@
 // Mercator vetületű világtérkép a gömb alakú Földön legrövidebb utakkal
 //=============================================================================================
 #include "./framework.h"
+// Fragment shader
+const char* fragmentSource = R"(
+    #version 330
+    precision highp float;
+    
+    uniform sampler2D textureUnit;
+    uniform int objectType;      // 0 = térkép, 1 = út, 2 = állomás
+    uniform vec3 color;          // Szín (út, állomás)
+    
+    // Napszakszámításhoz szükséges paraméterek
+    uniform int currentHour;     // 0-23 óra
+    uniform int currentDay;      // 172 = nyári napforduló
+    uniform float axisTilt;      // 23 fok radiánban (kb 0.4 radián)
+    
+    in vec2 texCoord;           // Textúra koordináták
+    out vec4 fragmentColor;
+    
+    const float PI = 3.14159265359;
+    
+    // Gömbi -> 3D koordináta konverzió
+    vec3 sphericalToCartesian(vec2 spherical) {
+        float lon = spherical.x;
+        float lat = spherical.y;
+        
+        float x = cos(lat) * cos(lon);
+        float y = cos(lat) * sin(lon);
+        float z = sin(lat);
+        
+        return vec3(x, y, z);
+    }
+    
+    // Mercator -> gömbi koordináta konverzió
+    vec2 mercatorToSpherical(vec2 mercator) {
+        // u: [0,1] -> hosszúság: [-180°, 180°]
+        // v: [0,1] -> szélesség: [-85°, 85°]
+        float longitude = (mercator.x - 0.5) * 2.0 * 180.0;  // fokban
+        float latitude = (mercator.y - 0.5) * 2.0 * 85.0;    // fokban
+        
+        // Átváltás radiánba
+        float lon = longitude * PI / 180.0;
+        float lat = latitude * PI / 180.0;
+        
+        return vec2(lon, lat);
+    }
+    
+    // Napszak számítás
+    bool isDaytime(vec2 mercator) {
+        // Mercator -> gömbi koordináták konvertálása
+        vec2 spherical = mercatorToSpherical(mercator);
+        
+        // A ponthoz tartozó felületi normálvektor (a gömb adott pontján)
+        vec3 surfaceNormal = sphericalToCartesian(spherical);
+        
+        // Nap állása a világtérben
+        // A Nap deklinációja (nyári napfordulón +23°)
+        float declination = axisTilt;
+        
+        // Az óra határozza meg a Nap helyzetét a forgás szerint
+        float hourAngle = float(currentHour) / 24.0 * 2.0 * PI;
+        
+        // Nap irányvektora
+        vec3 sunDirection;
+        sunDirection.x = -cos(hourAngle); // -cos mert 0 órakor nyugat felé áll
+        sunDirection.y = -sin(hourAngle); // -sin mert az óra növekedésével kelet felé halad
+        sunDirection.z = sin(declination); // A deklinációnak megfelelő magasság
+        
+        // Normalizálás
+        sunDirection = normalize(sunDirection);
+        
+        // A nappal/éjszaka eldöntése: ha a skaláris szorzat pozitív, akkor a felület a Nap felé néz
+        return dot(surfaceNormal, sunDirection) > 0.0;
+    }
+    
+    void main() {
+        if (objectType == 0) { // Térkép
+            // Térkép textúra beolvasása
+            vec4 texColor = texture(textureUnit, texCoord);
+            
+            // Napszak meghatározása az aktuális pixelre
+            bool daytime = isDaytime(texCoord);
+            
+            // Nappal vagy éjszaka szerinti színezés
+            if (!daytime) {
+                // Éjszaka 50%-kal sötétebb
+                fragmentColor = texColor * 0.5;
+            } else {
+                fragmentColor = texColor;
+            }
+        } else { // Út vagy állomás
+            fragmentColor = vec4(color, 1.0);
+        }
+    }
+)";
+
+// Vertex shader
+const char* vertexSource = R"(
+    #version 330
+    precision highp float;
+
+    uniform mat4 MVP;
+    layout(location = 0) in vec2 vp;       // position
+    layout(location = 1) in vec2 vertexUV; // texture coordinates
+    
+    out vec2 texCoord;
+    out vec2 mercatorPos;
+    
+    void main() {
+        gl_Position = vec4(vp.x, vp.y, 0, 1) * MVP;
+        texCoord = vertexUV;
+        mercatorPos = vertexUV; // Mercator koordináták továbbítása
+    }
+)";
+
+
 
 // A képhez használt konstansok
 const int winWidth = 600, winHeight = 600;
@@ -165,118 +279,9 @@ bool isDaytime(vec2 spherical) {
     return dot(surfaceNormal, rotatedSun) > 0.0;
 }
 
-// Vertex shader
-const char* vertexSource = R"(
-    #version 330
-    precision highp float;
 
-    uniform mat4 MVP;
-    layout(location = 0) in vec2 vp;       // position
-    layout(location = 1) in vec2 vertexUV; // texture coordinates
-    
-    out vec2 texCoord;
-    out vec2 mercatorPos;
-    
-    void main() {
-        gl_Position = vec4(vp.x, vp.y, 0, 1) * MVP;
-        texCoord = vertexUV;
-        mercatorPos = vertexUV; // Mercator koordináták továbbítása
-    }
-)";
 
-// Fragment shader
-const char* fragmentSource = R"(
-    #version 330
-    precision highp float;
-    
-    uniform sampler2D textureUnit;
-    uniform int objectType;      // 0 = térkép, 1 = út, 2 = állomás
-    uniform vec3 color;          // Szín (út, állomás)
-    
-    // Napszakszámításhoz szükséges paraméterek
-    uniform int currentHour;     // 0-23 óra
-    uniform int currentDay;      // 172 = nyári napforduló
-    uniform float axisTilt;      // 23 fok radiánban (kb 0.4 radián)
-    
-    in vec2 texCoord;           // Textúra koordináták
-    out vec4 fragmentColor;
-    
-    const float PI = 3.14159265359;
-    
-    // Gömbi -> 3D koordináta konverzió
-    vec3 sphericalToCartesian(vec2 spherical) {
-        float lon = spherical.x;
-        float lat = spherical.y;
-        
-        float x = cos(lat) * cos(lon);
-        float y = cos(lat) * sin(lon);
-        float z = sin(lat);
-        
-        return vec3(x, y, z);
-    }
-    
-    // Mercator -> gömbi koordináta konverzió
-    vec2 mercatorToSpherical(vec2 mercator) {
-        // u: [0,1] -> hosszúság: [-180°, 180°]
-        // v: [0,1] -> szélesség: [-85°, 85°]
-        float longitude = (mercator.x - 0.5) * 2.0 * 180.0;  // fokban
-        float latitude = (mercator.y - 0.5) * 2.0 * 85.0;    // fokban
-        
-        // Átváltás radiánba
-        float lon = longitude * PI / 180.0;
-        float lat = latitude * PI / 180.0;
-        
-        return vec2(lon, lat);
-    }
-    
-    // Napszak számítás
-    bool isDaytime(vec2 mercator) {
-        // Mercator -> gömbi koordináták konvertálása
-        vec2 spherical = mercatorToSpherical(mercator);
-        
-        // A ponthoz tartozó felületi normálvektor (a gömb adott pontján)
-        vec3 surfaceNormal = sphericalToCartesian(spherical);
-        
-        // Nap állása a világtérben
-        // A Nap deklinációja (nyári napfordulón +23°)
-        float declination = axisTilt;
-        
-        // Az óra határozza meg a Nap helyzetét a forgás szerint
-        float hourAngle = float(currentHour) / 24.0 * 2.0 * PI;
-        
-        // Nap irányvektora
-        vec3 sunDirection;
-        sunDirection.x = -cos(hourAngle); // -cos mert 0 órakor nyugat felé áll
-        sunDirection.y = -sin(hourAngle); // -sin mert az óra növekedésével kelet felé halad
-        sunDirection.z = sin(declination); // A deklinációnak megfelelő magasság
-        
-        // Normalizálás
-        sunDirection = normalize(sunDirection);
-        
-        // A nappal/éjszaka eldöntése: ha a skaláris szorzat pozitív, akkor a felület a Nap felé néz
-        return dot(surfaceNormal, sunDirection) > 0.0;
-    }
-    
-    void main() {
-        if (objectType == 0) { // Térkép
-            // Térkép textúra beolvasása
-            vec4 texColor = texture(textureUnit, texCoord);
-            
-            // Napszak meghatározása az aktuális pixelre
-            bool daytime = isDaytime(texCoord);
-            
-            // Nappal vagy éjszaka szerinti színezés
-            if (!daytime) {
-                // Éjszaka 50%-kal sötétebb
-                fragmentColor = texColor * 0.5;
-            } else {
-                fragmentColor = texColor;
-            }
-        } else { // Út vagy állomás
-            fragmentColor = vec4(color, 1.0);
-        }
-    }
-)";
+
 
 // Közös ősosztály minden objektumnak
 class Object {
