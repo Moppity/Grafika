@@ -2,13 +2,16 @@
 // Mercator vetületű világtérkép a gömb alakú Földön legrövidebb utakkal
 //=============================================================================================
 #include "./framework.h"
-#include <iostream>
-#include <cmath>
 
 // A képhez használt konstansok
 const int winWidth = 600, winHeight = 600;
 const int textureWidth = 64, textureHeight = 64;
 const float PI = 3.141592653589793f;
+
+// Föld paraméterek
+const float EARTH_RADIUS = 6371.0f; // Föld sugara km-ben
+const float EARTH_CIRCUMFERENCE = 40000.0f; // Föld kerülete km-ben
+const float AXIS_TILT = 23.0f * PI / 180.0f; // Tengely ferdeség radianban
 
 // A térkép adatok a feladatkiírás szerint
 const unsigned char mapData[] = {
@@ -21,6 +24,10 @@ const unsigned char mapData[] = {
     118, 1, 2, 1, 42, 1, 4, 5, 6, 5, 2, 4, 33, 78, 1, 6, 1, 6, 1, 10, 5, 34, 1, 20, 2, 9, 2, 12, 25, 14, 5, 30, 1, 54, 13, 6, 9, 2, 1, 32, 13, 8, 37, 2, 13, 2, 1, 70, 49, 28, 13, 16, 53, 2, 1, 46, 1, 2, 1, 2, 53, 28, 17, 16, 57, 14, 1, 18, 1, 14, 1, 2, 57, 24, 13, 20, 57, 0, 2, 1, 2, 17, 0, 17, 2, 61, 0, 5, 16, 1, 28, 25, 0, 41, 2, 117, 56, 25, 0, 33, 2, 1, 2, 117, 
     52, 201, 48, 77, 0, 121, 40, 1, 0, 205, 8, 1, 0, 1, 12, 213, 4, 13, 12, 253, 253, 253, 141
 };
+
+// Globális változók az idő kezeléséhez
+int currentHour = 0;     // Az aktuális óra (0-23)
+int currentDay = 172;    // Nyári napforduló napja (kb. június 21)
 
 // Koordinátarendszer váltó függvények
 // Mercator vetületi (u,v) koordinátákból gömbi (hosszúság, szélesség) radiánban
@@ -92,6 +99,20 @@ vec2 MercatorToPixel(float u, float v) {
     return vec2(x, y);
 }
 
+// Két pont közötti távolság számítása a gömbön
+float CalculateDistance(vec3 p1, vec3 p2) {
+    // A két pont közti szög a gömb középpontjából nézve
+    float dotProduct = dot(p1, p2);
+    // Korrigáljuk a numerikus pontatlanságokat
+    dotProduct = fmax(-1.0f, fmin(1.0f, dotProduct));
+    float angle = acos(dotProduct);
+    
+    // A távolság a szög és a Föld sugarának szorzata
+    float distanceKm = angle * EARTH_RADIUS;
+    
+    return distanceKm;
+}
+
 // Két pont közötti legrövidebb út számítása a gömbön (Nagy kör ív)
 std::vector<vec3> CalculateGreatCirclePoints(vec3 p1, vec3 p2, int segments) {
     std::vector<vec3> points;
@@ -112,6 +133,33 @@ std::vector<vec3> CalculateGreatCirclePoints(vec3 p1, vec3 p2, int segments) {
     return points;
 }
 
+// Napszak meghatározása egy adott koordinátán
+bool IsDaytime(vec2 spherical, int hour, int dayOfYear) {
+    // A Nap deklinációja (a Nap zeniti pozíciójának szöge)
+    // A nyári napfordulón (172. nap) a legnagyobb, a téli napfordulón a legkisebb
+    float declination = AXIS_TILT * cos((dayOfYear - 172) * 2.0f * PI / 365.0f);
+    
+    // Helyi idő számítása a hosszúsági fok alapján
+    float localHour = hour + (spherical.x * 12.0f / PI); // Hosszúság radiánban, 1 óra = 15 fok
+    while (localHour >= 24) localHour -= 24;
+    while (localHour < 0) localHour += 24;
+    
+    // Helyi napállás számítása
+    float hourAngle = (localHour - 12) * PI / 12.0f; // déli 12 órakor 0
+    
+    // A Nap iránya a helyi koordinátarendszerben
+    vec3 sunDirection;
+    sunDirection.y = sin(hourAngle) * cos(declination);
+    sunDirection.x = cos(hourAngle) * cos(declination);
+    sunDirection.z = sin(declination);
+    
+    // A felületi normálvektor a gömbi koordinátákból
+    vec3 surfaceNormal = SphericalToCartesian(spherical);
+    
+    // Ha a skaláris szorzat pozitív, akkor a felület a Nap felé néz (nappal van)
+    return dot(surfaceNormal, sunDirection) > 0;
+}
+
 // Vertex shader
 const char* vertexSource = R"(
     #version 330
@@ -122,10 +170,12 @@ const char* vertexSource = R"(
     layout(location = 1) in vec2 vertexUV; // texture coordinates
     
     out vec2 texCoord;
+    out vec2 mercatorPos;
     
     void main() {
         gl_Position = vec4(vp.x, vp.y, 0, 1) * MVP;
         texCoord = vertexUV;
+        mercatorPos = vertexUV; // Mercator koordináták továbbítása
     }
 )";
 
@@ -135,18 +185,88 @@ const char* fragmentSource = R"(
     precision highp float;
     
     uniform sampler2D textureUnit;
-    uniform float isDayTime;
+    uniform int objectType;      // 0 = térkép, 1 = út, 2 = állomás
+    uniform vec3 color;          // Szín (út, állomás)
+    
+    // Napszakszámításhoz szükséges paraméterek
+    uniform int currentHour;
+    uniform int currentDay;
+    uniform float axisTilt;      // Tengelyferdeség (radiánban)
     
     in vec2 texCoord;
+    in vec2 mercatorPos;
     out vec4 fragmentColor;
     
+    // Mercator -> gömbi koordináta konverzió
+    vec2 mercatorToSpherical(vec2 mercator) {
+        float longitude = (mercator.x - 0.5) * 2.0 * 180.0;  // fokban
+        float latitude = (mercator.y - 0.5) * 2.0 * 85.0;    // fokban
+        
+        // Átváltás radiánba
+        float lon = longitude * 3.14159265359 / 180.0;
+        float lat = latitude * 3.14159265359 / 180.0;
+        
+        return vec2(lon, lat);
+    }
+    
+    // Gömbi -> 3D koordináta konverzió
+    vec3 sphericalToCartesian(vec2 spherical) {
+        float lon = spherical.x;
+        float lat = spherical.y;
+        
+        float x = cos(lat) * cos(lon);
+        float y = cos(lat) * sin(lon);
+        float z = sin(lat);
+        
+        return vec3(x, y, z);
+    }
+    
+    // Napszak számítás egy adott gömbi koordinátára
+    bool isDaytime(vec2 spherical) {
+        // A Nap deklinációja
+        float declination = axisTilt * cos((float(currentDay) - 172.0) * 2.0 * 3.14159265359 / 365.0);
+        
+        // Helyi idő számítása a hosszúsági fok alapján
+        float localHour = float(currentHour) + (spherical.x * 12.0 / 3.14159265359);
+        while (localHour >= 24.0) localHour -= 24.0;
+        while (localHour < 0.0) localHour += 24.0;
+        
+        // Helyi napállás számítása
+        float hourAngle = (localHour - 12.0) * 3.14159265359 / 12.0;
+        
+        // A Nap iránya
+        vec3 sunDirection;
+        sunDirection.y = sin(hourAngle) * cos(declination);
+        sunDirection.x = cos(hourAngle) * cos(declination);
+        sunDirection.z = sin(declination);
+        
+        // A felületi normálvektor
+        vec3 surfaceNormal = sphericalToCartesian(spherical);
+        
+        // Ha a skaláris szorzat pozitív, akkor a felület a Nap felé néz (nappal van)
+        return dot(surfaceNormal, sunDirection) > 0.0;
+    }
+    
     void main() {
-        vec4 texColor = texture(textureUnit, texCoord);
-        if (isDayTime < 0.5) {
-            // Éjszaka esetén 50%-kal sötétítünk
-            fragmentColor = texColor * 0.5;
-        } else {
-            fragmentColor = texColor;
+        if (objectType == 0) { // Térkép
+            // Térkép textúra
+            vec4 texColor = texture(textureUnit, texCoord);
+            
+            // Az aktuális pixelhez tartozó gömbi koordináta
+            vec2 spherical = mercatorToSpherical(mercatorPos);
+            
+            // Napszak meghatározása az aktuális pixelre
+            bool daytime = isDaytime(spherical);
+            
+            // Nappal vagy éjszaka szerinti színezés
+            if (!daytime) {
+                // Éjszaka 50%-kal sötétebb
+                fragmentColor = texColor * 0.5;
+            } else {
+                fragmentColor = texColor;
+            }
+        } else { // Út vagy állomás
+            fragmentColor = vec4(color, 1.0);
         }
     }
 )";
@@ -218,41 +338,44 @@ public:
     }
     
     void DecodeImage() {
-    // Dekódoljuk a képet a helyes RLE algoritmussal
-    decodedImage.resize(textureWidth * textureHeight);
-    
-    // Színtábla definiálása
-    vec4 colorTable[4] = {
-        vec4(1.0f, 1.0f, 1.0f, 1.0f), // fehér
-        vec4(0.0f, 0.0f, 1.0f, 1.0f), // kék
-        vec4(0.0f, 1.0f, 0.0f, 1.0f), // zöld
-        vec4(0.0f, 0.0f, 0.0f, 1.0f)  // fekete
-    };
-    
-    int pixel_index = 0;
-    
-    // Minden bájtot feldolgozunk
-    for (unsigned int i = 0; i < sizeof(mapData) && pixel_index < textureWidth * textureHeight; i++) {
-        unsigned char byte = mapData[i];
+        // Dekódoljuk a képet a helyes RLE algoritmussal
+        decodedImage.resize(textureWidth * textureHeight);
         
-        // Felső 6 bit a hossz, alsó 2 bit a szín
-        int length = byte >> 2;       // A hossz (a felső 6 bit)
-        int colorIndex = byte & 0x3;  // A szín (az alsó 2 bit)
+        // Színtábla definiálása
+        vec4 colorTable[4] = {
+            vec4(1.0f, 1.0f, 1.0f, 1.0f), // fehér
+            vec4(0.0f, 0.0f, 1.0f, 1.0f), // kék
+            vec4(0.0f, 1.0f, 0.0f, 1.0f), // zöld
+            vec4(0.0f, 0.0f, 0.0f, 1.0f)  // fekete
+        };
         
-        // Az adott színt length+1 alkalommal ismételjük
-        for (int j = 0; j <= length && pixel_index < textureWidth * textureHeight; j++) {
-            decodedImage[pixel_index++] = colorTable[colorIndex];
+        int pixel_index = 0;
+        
+        // Minden bájtot feldolgozunk
+        for (unsigned int i = 0; i < sizeof(mapData) && pixel_index < textureWidth * textureHeight; i++) {
+            unsigned char byte = mapData[i];
+            
+            // Felső 6 bit a hossz, alsó 2 bit a szín
+            int length = byte >> 2;       // A hossz (a felső 6 bit)
+            int colorIndex = byte & 0x3;  // A szín (az alsó 2 bit)
+            
+            // Az adott színt length+1 alkalommal ismételjük
+            for (int j = 0; j <= length && pixel_index < textureWidth * textureHeight; j++) {
+                decodedImage[pixel_index++] = colorTable[colorIndex];
+            }
+        }
+        
+        // Ha nem sikerült kitölteni a teljes képet, a maradékot feketével töltjük
+        while (pixel_index < textureWidth * textureHeight) {
+            decodedImage[pixel_index++] = vec4(0.0f, 0.0f, 0.0f, 1.0f);
         }
     }
     
-    // Ha nem sikerült kitölteni a teljes képet, a maradékot feketével töltjük
-    while (pixel_index < textureWidth * textureHeight) {
-        decodedImage[pixel_index++] = vec4(0.0f, 0.0f, 0.0f, 1.0f);
-    }
-}
-    
     void Draw(GPUProgram* gpuProgram) override {
-        // Aktív textúra beállítása
+        // Objektum típus beállítása (0 = térkép)
+        gpuProgram->setUniform(0, "objectType");
+        
+        // Textúra beállítása
         int samplerUnit = 0;
         gpuProgram->setUniform(samplerUnit, "textureUnit");
         
@@ -272,52 +395,40 @@ public:
 // Út osztály - töröttvonal a gömbi geometria szerint
 class Path : public Object {
 private:
-    std::vector<vec2> points; // Töröttvonal pontjai Mercator koordinátákban (u,v)
+    bool initialized;  // Az első két pont már megvan?
+    std::vector<std::vector<float>> lineSegments; // Minden szakasz adatai
+    std::vector<float> distances; // Távolságok km-ben
     
 public:
     Path() {
         color = vec3(1.0f, 1.0f, 0.0f); // Sárga szín
+        initialized = false;
     }
     
-    void AddPoint(vec2 point) {
-        points.push_back(point);
-        
-        // Ha legalább két pont van, akkor tudunk már vonalszakaszt rajzolni
-        if (points.size() >= 2) {
-            // Előre foglaljunk helyet 100 pontnak (majd később bővítjük, ha kell)
-            std::vector<float> lineVertices;
-            lineVertices.reserve(100 * 2);
-            
-            // Gömbi geometria szerinti legrövidebb út számítása
-            CalculateGreatCircleRoute(lineVertices);
-            
-            // Buffer frissítése
-            glBindBuffer(GL_ARRAY_BUFFER, vbo);
-            glBufferData(GL_ARRAY_BUFFER, lineVertices.size() * sizeof(float), lineVertices.data(), GL_STATIC_DRAW);
-            
-            // Pozíció attribútum beállítása
-            glEnableVertexAttribArray(0);
-            glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, 0);
-        }
-    }
-    
-    void CalculateGreatCircleRoute(std::vector<float>& vertices) {
-        // Az utolsó két pont között számítjuk a legrövidebb utat
-        int idx = points.size() - 2;
-        vec2 uv1 = points[idx];
-        vec2 uv2 = points[idx + 1];
-        
+    // Két pont között útvonal számítása
+    void AddSegment(vec2 startPos, vec2 endPos) {
         // Átváltás gömbi koordinátákra
-        vec2 spherical1 = MercatorToSpherical(uv1.x, uv1.y);
-        vec2 spherical2 = MercatorToSpherical(uv2.x, uv2.y);
+        vec2 spherical1 = MercatorToSpherical(startPos.x, startPos.y);
+        vec2 spherical2 = MercatorToSpherical(endPos.x, endPos.y);
         
         // Átváltás 3D Descartes koordinátákba
         vec3 p1 = SphericalToCartesian(spherical1);
         vec3 p2 = SphericalToCartesian(spherical2);
         
+        // Távolság számítása
+        float distance = CalculateDistance(p1, p2);
+        distances.push_back(distance);
+        
+        // Kiírás a konzolra
+        printf("Distance: %.0f km\n", distance);
+        
         // Köztes pontok számítása (a töröttvonalhoz 100 pont)
         const int segments = 100;
         std::vector<vec3> greatCirclePoints = CalculateGreatCirclePoints(p1, p2, segments);
+        
+        // Szakasz adatainak tárolása
+        std::vector<float> lineVertices;
+        lineVertices.reserve((segments + 1) * 2);
         
         // Pontok átalakítása és hozzáadása a kimeneti tömbhöz
         for (const vec3& p : greatCirclePoints) {
@@ -331,22 +442,52 @@ public:
             float x = uv.x * 2.0f - 1.0f;
             float y = uv.y * 2.0f - 1.0f;
             
-            vertices.push_back(x);
-            vertices.push_back(y);
+            lineVertices.push_back(x);
+            lineVertices.push_back(y);
         }
+        
+        // Hozzáadjuk a szakaszt a tárolóhoz
+        lineSegments.push_back(lineVertices);
+        
+        // Az első szakasz után inicializálva van
+        initialized = true;
     }
     
     void Draw(GPUProgram* gpuProgram) override {
-        // Ha nincs elég pont, nem rajzolunk semmit
-        if (points.size() < 2) return;
+        // Ha nincs útvonal, nem rajzolunk semmit
+        if (!initialized || lineSegments.empty()) return;
+        
+        // Objektum típus beállítása (1 = út)
+        gpuProgram->setUniform(1, "objectType");
         
         // Szín beállítása
         gpuProgram->setUniform(color, "color");
         
-        // Rendering
+        // Minden szakaszt külön rajzolunk
         glBindVertexArray(vao);
         glLineWidth(3.0); // Vastagabb vonal
-        glDrawArrays(GL_LINE_STRIP, 0, 101); // 100 szakasz = 101 pont
+        
+        for (const auto& segment : lineSegments) {
+            // Buffer feltöltése az aktuális szakasszal
+            glBindBuffer(GL_ARRAY_BUFFER, vbo);
+            glBufferData(GL_ARRAY_BUFFER, segment.size() * sizeof(float), segment.data(), GL_STATIC_DRAW);
+            
+            // Pozíció attribútum beállítása
+            glEnableVertexAttribArray(0);
+            glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, 0);
+            
+            // Szakasz rajzolása
+            glDrawArrays(GL_LINE_STRIP, 0, (int)(segment.size() / 2));
+        }
+    }
+    
+    // Teljes távolság km-ben
+    float GetTotalDistance() const {
+        float total = 0.0f;
+        for (float d : distances) {
+            total += d;
+        }
+        return total;
     }
 };
 
@@ -375,6 +516,9 @@ public:
     }
     
     void Draw(GPUProgram* gpuProgram) override {
+        // Objektum típus beállítása (2 = állomás)
+        gpuProgram->setUniform(2, "objectType");
+        
         // Szín beállítása
         gpuProgram->setUniform(color, "color");
         
@@ -395,14 +539,12 @@ class MercatorMapApp : public glApp {
     Path* path;
     std::vector<Station*> stations;
     GPUProgram* gpuProgram;
-    bool isDayTime;
     
 public:
     MercatorMapApp() : glApp("Mercator Map") {
         map = nullptr;
         path = nullptr;
         gpuProgram = nullptr;
-        isDayTime = true; // Alapértelmezetten nappal van
     }
     
     void onInitialization() override {
@@ -413,76 +555,94 @@ public:
         
         // Térkép létrehozása
         map = new Map();
+        
         // Út létrehozása
-       path = new Path();
+        path = new Path();
        
-       // A uniform változók kezdeti beállítása
-       gpuProgram->setUniform((float)isDayTime, "isDayTime");
-       
-       // MVP mátrix (most identitás, mert nem transzformáljuk a képet)
-       mat4 mvp = mat4(1.0f);
-       gpuProgram->setUniform(mvp, "MVP");
-   }
-   
-   void onDisplay() override {
-       // Háttér törlése
-       glClearColor(0, 0, 0, 0);
-       glClear(GL_COLOR_BUFFER_BIT);
-       
-       // Shader program aktiválása
-       gpuProgram->Use();
-       
-       // Napszak beállítása
-       gpuProgram->setUniform((float)isDayTime, "isDayTime");
-       
-       // Térkép rajzolása
-       map->Draw(gpuProgram);
-       
-       // Út rajzolása
-       path->Draw(gpuProgram);
-       
-       // Állomások rajzolása
-       for (auto station : stations) {
-           station->Draw(gpuProgram);
-       }
-   }
-   
-   void onKeyboard(int key) override {
-       // 'n' gomb: napszak váltás
-       if (key == 'n') {
-           isDayTime = !isDayTime;
-           refreshScreen();
-       }
-   }
-   
-   void onMousePressed(MouseButton button, int pX, int pY) override {
-       // Egér bal gomb: új állomás hozzáadása
-       if (button == MOUSE_LEFT) {
-           // Képernyő koordinátából normalizált koordináta (0..1)
-           vec2 mercator = PixelToMercator(pX, pY);
-           
-           // Új állomás létrehozása
-           Station* station = new Station(mercator);
-           stations.push_back(station);
-           
-           // Ha már van legalább egy állomás, akkor az utat is frissítjük
-           if (stations.size() > 1) {
-               path->AddPoint(stations[stations.size() - 2]->GetPosition());
-               path->AddPoint(stations[stations.size() - 1]->GetPosition());
-           }
-           
-           refreshScreen();
-       }
-   }
-   
-   ~MercatorMapApp() {
-       delete gpuProgram;
-       delete map;
-       delete path;
-       for (auto station : stations) {
-           delete station;
-       }
-   }
+        // Az idő kezdeti beállítása (nyári napforduló, 0 óra GMT)
+        currentHour = 0;
+        currentDay = 172; // kb. június 21
+        
+        // Shader uniform változók kezdeti beállítása
+        gpuProgram->setUniform(currentHour, "currentHour");
+        gpuProgram->setUniform(currentDay, "currentDay");
+        gpuProgram->setUniform(AXIS_TILT, "axisTilt");
+        
+        // MVP mátrix (most identitás, mert nem transzformáljuk a képet)
+        mat4 mvp = mat4(1.0f);
+        gpuProgram->setUniform(mvp, "MVP");
+        
+        printf("Kezdeti idő: %d. nap, %02d:00 GMT (nyári napforduló)\n", currentDay, currentHour);
+    }
+    
+    void onDisplay() override {
+        // Háttér törlése
+        glClearColor(0, 0, 0, 0);
+        glClear(GL_COLOR_BUFFER_BIT);
+        
+        // Shader program aktiválása
+        gpuProgram->Use();
+        
+        // Idő beállítása a shadernek
+        gpuProgram->setUniform(currentHour, "currentHour");
+        gpuProgram->setUniform(currentDay, "currentDay");
+        
+        // Térkép rajzolása
+        map->Draw(gpuProgram);
+        
+        // Út rajzolása
+        path->Draw(gpuProgram);
+        
+        // Állomások rajzolása
+        for (auto station : stations) {
+            station->Draw(gpuProgram);
+        }
+    }
+    
+    void onKeyboard(int key) override {
+        // 'n' gomb: óránként léptetjük az időt
+        if (key == 'n') {
+            currentHour = (currentHour + 1) % 24;
+            printf("Aktuális idő: %d. nap, %02d:00 GMT\n", currentDay, currentHour);
+            refreshScreen();
+        }
+    }
+    
+    void onMousePressed(MouseButton button, int pX, int pY) override {
+        // Egér bal gomb: új állomás hozzáadása
+        if (button == MOUSE_LEFT) {
+            // Képernyő koordinátából normalizált koordináta (0..1)
+            vec2 mercator = PixelToMercator(pX, pY);
+            
+            // Új állomás létrehozása és tárolása
+            Station* station = new Station(mercator);
+            stations.push_back(station);
+            
+            // Ha már van legalább két állomás, akkor új útvonalszakasz hozzáadása
+            if (stations.size() >= 2) {
+                // Az utolsó előtti és utolsó állomás közötti szakasz
+                vec2 prevPos = stations[stations.size() - 2]->GetPosition();
+                vec2 currPos = stations[stations.size() - 1]->GetPosition();
+                
+                // Útvonal szakasz hozzáadása
+                path->AddSegment(prevPos, currPos);
+                
+                // Teljes távolság kiírása
+                printf("Teljes távolság: %.0f km\n", path->GetTotalDistance());
+            }
+            
+            refreshScreen();
+        }
+    }
+    
+    ~MercatorMapApp() {
+        delete gpuProgram;
+        delete map;
+        delete path;
+        for (auto station : stations) {
+            delete station;
+        }
+    }
 };
 
 // Alkalmazás példányosítása
