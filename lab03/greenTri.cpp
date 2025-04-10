@@ -134,30 +134,35 @@ std::vector<vec3> CalculateGreatCirclePoints(vec3 p1, vec3 p2, int segments) {
 }
 
 // Napszak meghatározása egy adott koordinátán
-bool IsDaytime(vec2 spherical, int hour, int dayOfYear) {
-    // A Nap deklinációja (a Nap zeniti pozíciójának szöge)
-    // A nyári napfordulón (172. nap) a legnagyobb, a téli napfordulón a legkisebb
-    float declination = AXIS_TILT * cos((dayOfYear - 172) * 2.0f * PI / 365.0f);
+bool isDaytime(vec2 spherical) {
+    // A Nap deklinációja (nyári napfordulón +23.5°)
+    float declination = AXIS_TILT * cos((float(currentDay) - 172.0) * 2.0 * 3.14159265359 / 365.0);
     
-    // Helyi idő számítása a hosszúsági fok alapján
-    float localHour = hour + (spherical.x * 12.0f / PI); // Hosszúság radiánban, 1 óra = 15 fok
-    while (localHour >= 24) localHour -= 24;
-    while (localHour < 0) localHour += 24;
-    
-    // Helyi napállás számítása
-    float hourAngle = (localHour - 12) * PI / 12.0f; // déli 12 órakor 0
-    
-    // A Nap iránya a helyi koordinátarendszerben
+    // A Nap iránya a világűrben (egységvektor)
     vec3 sunDirection;
-    sunDirection.y = sin(hourAngle) * cos(declination);
-    sunDirection.x = cos(hourAngle) * cos(declination);
-    sunDirection.z = sin(declination);
     
-    // A felületi normálvektor a gömbi koordinátákból
+    // Nyári napfordulón 0 órakor:
+    // A nap a (0,-1,0) irányban van (nyugati oldalon), és declination szöggel emelkedik az egyenlítő fölé
+    float hourAngle = float(currentHour) / 24.0 * 2.0 * 3.14159265359;
+    
+    // Számítás a helyes 3D koordináta-rendszerben
+    sunDirection.x = -cos(hourAngle);
+    sunDirection.y = -sin(hourAngle);
+    sunDirection.z = 0.0;
+    
+    // Elforgatás a deklinációval
+    vec3 rotatedSun;
+    float cosDecl = cos(declination);
+    float sinDecl = sin(declination);
+    rotatedSun.x = sunDirection.x;
+    rotatedSun.y = sunDirection.y * cosDecl - sunDirection.z * sinDecl;
+    rotatedSun.z = sunDirection.y * sinDecl + sunDirection.z * cosDecl;
+    
+    // A felületi normálvektor
     vec3 surfaceNormal = SphericalToCartesian(spherical);
     
     // Ha a skaláris szorzat pozitív, akkor a felület a Nap felé néz (nappal van)
-    return dot(surfaceNormal, sunDirection) > 0;
+    return dot(surfaceNormal, rotatedSun) > 0.0;
 }
 
 // Vertex shader
@@ -189,25 +194,14 @@ const char* fragmentSource = R"(
     uniform vec3 color;          // Szín (út, állomás)
     
     // Napszakszámításhoz szükséges paraméterek
-    uniform int currentHour;
-    uniform int currentDay;
-    uniform float axisTilt;      // Tengelyferdeség (radiánban)
+    uniform int currentHour;     // 0-23 óra
+    uniform int currentDay;      // 172 = nyári napforduló
+    uniform float axisTilt;      // 23 fok radiánban (kb 0.4 radián)
     
-    in vec2 texCoord;
-    in vec2 mercatorPos;
+    in vec2 texCoord;           // Textúra koordináták
     out vec4 fragmentColor;
     
-    // Mercator -> gömbi koordináta konverzió
-    vec2 mercatorToSpherical(vec2 mercator) {
-        float longitude = (mercator.x - 0.5) * 2.0 * 180.0;  // fokban
-        float latitude = (mercator.y - 0.5) * 2.0 * 85.0;    // fokban
-        
-        // Átváltás radiánba
-        float lon = longitude * 3.14159265359 / 180.0;
-        float lat = latitude * 3.14159265359 / 180.0;
-        
-        return vec2(lon, lat);
-    }
+    const float PI = 3.14159265359;
     
     // Gömbi -> 3D koordináta konverzió
     vec3 sphericalToCartesian(vec2 spherical) {
@@ -221,42 +215,55 @@ const char* fragmentSource = R"(
         return vec3(x, y, z);
     }
     
-    // Napszak számítás egy adott gömbi koordinátára
-    bool isDaytime(vec2 spherical) {
-        // A Nap deklinációja
-        float declination = axisTilt * cos((float(currentDay) - 172.0) * 2.0 * 3.14159265359 / 365.0);
+    // Mercator -> gömbi koordináta konverzió
+    vec2 mercatorToSpherical(vec2 mercator) {
+        // u: [0,1] -> hosszúság: [-180°, 180°]
+        // v: [0,1] -> szélesség: [-85°, 85°]
+        float longitude = (mercator.x - 0.5) * 2.0 * 180.0;  // fokban
+        float latitude = (mercator.y - 0.5) * 2.0 * 85.0;    // fokban
         
-        // Helyi idő számítása a hosszúsági fok alapján
-        float localHour = float(currentHour) + (spherical.x * 12.0 / 3.14159265359);
-        while (localHour >= 24.0) localHour -= 24.0;
-        while (localHour < 0.0) localHour += 24.0;
+        // Átváltás radiánba
+        float lon = longitude * PI / 180.0;
+        float lat = latitude * PI / 180.0;
         
-        // Helyi napállás számítása
-        float hourAngle = (localHour - 12.0) * 3.14159265359 / 12.0;
+        return vec2(lon, lat);
+    }
+    
+    // Napszak számítás
+    bool isDaytime(vec2 mercator) {
+        // Mercator -> gömbi koordináták konvertálása
+        vec2 spherical = mercatorToSpherical(mercator);
         
-        // A Nap iránya
-        vec3 sunDirection;
-        sunDirection.y = sin(hourAngle) * cos(declination);
-        sunDirection.x = cos(hourAngle) * cos(declination);
-        sunDirection.z = sin(declination);
-        
-        // A felületi normálvektor
+        // A ponthoz tartozó felületi normálvektor (a gömb adott pontján)
         vec3 surfaceNormal = sphericalToCartesian(spherical);
         
-        // Ha a skaláris szorzat pozitív, akkor a felület a Nap felé néz (nappal van)
+        // Nap állása a világtérben
+        // A Nap deklinációja (nyári napfordulón +23°)
+        float declination = axisTilt;
+        
+        // Az óra határozza meg a Nap helyzetét a forgás szerint
+        float hourAngle = float(currentHour) / 24.0 * 2.0 * PI;
+        
+        // Nap irányvektora
+        vec3 sunDirection;
+        sunDirection.x = -cos(hourAngle); // -cos mert 0 órakor nyugat felé áll
+        sunDirection.y = -sin(hourAngle); // -sin mert az óra növekedésével kelet felé halad
+        sunDirection.z = sin(declination); // A deklinációnak megfelelő magasság
+        
+        // Normalizálás
+        sunDirection = normalize(sunDirection);
+        
+        // A nappal/éjszaka eldöntése: ha a skaláris szorzat pozitív, akkor a felület a Nap felé néz
         return dot(surfaceNormal, sunDirection) > 0.0;
     }
     
     void main() {
         if (objectType == 0) { // Térkép
-            // Térkép textúra
+            // Térkép textúra beolvasása
             vec4 texColor = texture(textureUnit, texCoord);
             
-            // Az aktuális pixelhez tartozó gömbi koordináta
-            vec2 spherical = mercatorToSpherical(mercatorPos);
-            
             // Napszak meghatározása az aktuális pixelre
-            bool daytime = isDaytime(spherical);
+            bool daytime = isDaytime(texCoord);
             
             // Nappal vagy éjszaka szerinti színezés
             if (!daytime) {
@@ -558,7 +565,7 @@ public:
         
         // Út létrehozása
         path = new Path();
-       
+    
         // Az idő kezdeti beállítása (nyári napforduló, 0 óra GMT)
         currentHour = 0;
         currentDay = 172; // kb. június 21
@@ -566,38 +573,42 @@ public:
         // Shader uniform változók kezdeti beállítása
         gpuProgram->setUniform(currentHour, "currentHour");
         gpuProgram->setUniform(currentDay, "currentDay");
-        gpuProgram->setUniform(AXIS_TILT, "axisTilt");
+        gpuProgram->setUniform(AXIS_TILT, "axisTilt");  // A tengelyferdeség radiánban
         
         // MVP mátrix (most identitás, mert nem transzformáljuk a képet)
         mat4 mvp = mat4(1.0f);
         gpuProgram->setUniform(mvp, "MVP");
         
         printf("Kezdeti idő: %d. nap, %02d:00 GMT (nyári napforduló)\n", currentDay, currentHour);
-    }
+}
     
     void onDisplay() override {
-        // Háttér törlése
-        glClearColor(0, 0, 0, 0);
-        glClear(GL_COLOR_BUFFER_BIT);
-        
-        // Shader program aktiválása
-        gpuProgram->Use();
-        
-        // Idő beállítása a shadernek
-        gpuProgram->setUniform(currentHour, "currentHour");
-        gpuProgram->setUniform(currentDay, "currentDay");
-        
-        // Térkép rajzolása
-        map->Draw(gpuProgram);
-        
-        // Út rajzolása
-        path->Draw(gpuProgram);
-        
-        // Állomások rajzolása
-        for (auto station : stations) {
-            station->Draw(gpuProgram);
-        }
+    // Háttér törlése
+    glClearColor(0, 0, 0, 0);
+    glClear(GL_COLOR_BUFFER_BIT);
+    
+    // Shader program aktiválása
+    gpuProgram->Use();
+    
+    // Idő beállítása a shadernek
+    gpuProgram->setUniform(currentHour, "currentHour");
+    gpuProgram->setUniform(currentDay, "currentDay");
+    gpuProgram->setUniform(AXIS_TILT, "axisTilt");
+    
+    // Térkép rajzolása
+    gpuProgram->setUniform(0, "objectType");
+    map->Draw(gpuProgram);
+    
+    // Út rajzolása
+    gpuProgram->setUniform(1, "objectType");
+    path->Draw(gpuProgram);
+    
+    // Állomások rajzolása
+    gpuProgram->setUniform(2, "objectType");
+    for (auto station : stations) {
+        station->Draw(gpuProgram);
     }
+}
     
     void onKeyboard(int key) override {
         // 'n' gomb: óránként léptetjük az időt
