@@ -1,7 +1,5 @@
-//=============================================================================================
-// Mercator vetületű világtérkép a gömb alakú Földön legrövidebb utakkal
-//=============================================================================================
 #include "./framework.h"
+
 // Fragment shader
 const char* fragmentSource = R"(
     #version 330
@@ -32,6 +30,7 @@ const char* fragmentSource = R"(
         
         return vec3(x, y, z);
     }
+
     
     // Mercator -> gömbi koordináta konverzió
     vec2 mercatorToSpherical(vec2 mercator) {
@@ -57,7 +56,7 @@ const char* fragmentSource = R"(
         
         // Nap állása a világtérben
         // A Nap deklinációja (nyári napfordulón +23°)
-        float declination = axisTilt;
+        float declination = axisTilt * cos((float(currentDay) - 172.0) * 2.0 * PI / 365.0);
         
         // Az óra határozza meg a Nap helyzetét a forgás szerint
         float hourAngle = float(currentHour) / 24.0 * 2.0 * PI;
@@ -106,16 +105,12 @@ const char* vertexSource = R"(
     layout(location = 1) in vec2 vertexUV; // texture coordinates
     
     out vec2 texCoord;
-    out vec2 mercatorPos;
     
     void main() {
         gl_Position = vec4(vp.x, vp.y, 0, 1) * MVP;
         texCoord = vertexUV;
-        mercatorPos = vertexUV; // Mercator koordináták továbbítása
     }
 )";
-
-
 
 // A képhez használt konstansok
 const int winWidth = 600, winHeight = 600;
@@ -124,7 +119,7 @@ const float PI = 3.141592653589793f;
 
 // Föld paraméterek
 const float EARTH_RADIUS = 6371.0f; // Föld sugara km-ben
-const float EARTH_CIRCUMFERENCE = 40000.0f; // Föld kerülete km-ben
+const float EARTH_CIRCUMFERENCE = 40000.0f; // Föld kerülete km-ben (feladat szerint)
 const float AXIS_TILT = 23.0f * PI / 180.0f; // Tengely ferdeség radianban
 
 // A térkép adatok a feladatkiírás szerint
@@ -232,13 +227,24 @@ std::vector<vec3> CalculateGreatCirclePoints(vec3 p1, vec3 p2, int segments) {
     std::vector<vec3> points;
     points.reserve(segments + 1);
     
+    // A két pont közötti szög
+    float dotProduct = dot(p1, p2);
+    dotProduct = fmax(-1.0f, fmin(1.0f, dotProduct)); // Korrigálás a numerikus pontosság miatt
+    float omega = acos(dotProduct);
+    
     // Gömbön mozgó pont interpolációja
     for (int i = 0; i <= segments; i++) {
         float t = (float)i / segments;
         
-        // Lineáris interpoláció
-        vec3 p = p1 * (1.0f - t) + p2 * t;
-        // Vetítés vissza a gömb felületére
+        // Szférikus interpoláció (SLERP) a gömbön
+        vec3 p;
+        if (omega < 0.00001f) {
+            p = p1; // A két pont gyakorlatilag egybeesik
+        } else {
+            p = (sin((1.0f - t) * omega) * p1 + sin(t * omega) * p2) / sin(omega);
+        }
+        
+        // Normalizálás a numerikus hibák elkerülése érdekében
         p = normalize(p);
         
         points.push_back(p);
@@ -246,42 +252,6 @@ std::vector<vec3> CalculateGreatCirclePoints(vec3 p1, vec3 p2, int segments) {
     
     return points;
 }
-
-// Napszak meghatározása egy adott koordinátán
-bool isDaytime(vec2 spherical) {
-    // A Nap deklinációja (nyári napfordulón +23.5°)
-    float declination = AXIS_TILT * cos((float(currentDay) - 172.0) * 2.0 * 3.14159265359 / 365.0);
-    
-    // A Nap iránya a világűrben (egységvektor)
-    vec3 sunDirection;
-    
-    // Nyári napfordulón 0 órakor:
-    // A nap a (0,-1,0) irányban van (nyugati oldalon), és declination szöggel emelkedik az egyenlítő fölé
-    float hourAngle = float(currentHour) / 24.0 * 2.0 * 3.14159265359;
-    
-    // Számítás a helyes 3D koordináta-rendszerben
-    sunDirection.x = -cos(hourAngle);
-    sunDirection.y = -sin(hourAngle);
-    sunDirection.z = 0.0;
-    
-    // Elforgatás a deklinációval
-    vec3 rotatedSun;
-    float cosDecl = cos(declination);
-    float sinDecl = sin(declination);
-    rotatedSun.x = sunDirection.x;
-    rotatedSun.y = sunDirection.y * cosDecl - sunDirection.z * sinDecl;
-    rotatedSun.z = sunDirection.y * sinDecl + sunDirection.z * cosDecl;
-    
-    // A felületi normálvektor
-    vec3 surfaceNormal = SphericalToCartesian(spherical);
-    
-    // Ha a skaláris szorzat pozitív, akkor a felület a Nap felé néz (nappal van)
-    return dot(surfaceNormal, rotatedSun) > 0.0;
-}
-
-
-
-
 
 // Közös ősosztály minden objektumnak
 class Object {
@@ -346,7 +316,7 @@ public:
         
         // Textúra paraméterek beállítása
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST); // FONTOS: NEAREST, nem LINEAR
     }
     
     void DecodeImage() {
@@ -404,7 +374,7 @@ public:
     }
 };
 
-// Út osztály - töröttvonal a gömbi geometria szerint
+// Út osztály - törörttvonal a gömbi geometria szerint
 class Path : public Object {
 private:
     bool initialized;  // Az első két pont már megvan?
@@ -434,7 +404,7 @@ public:
         // Kiírás a konzolra
         printf("Distance: %.0f km\n", distance);
         
-        // Köztes pontok számítása (a töröttvonalhoz 100 pont)
+        // Köztes pontok számítása (a töröttvonahoz pontosan 100 pont)
         const int segments = 100;
         std::vector<vec3> greatCirclePoints = CalculateGreatCirclePoints(p1, p2, segments);
         
@@ -585,35 +555,32 @@ public:
         gpuProgram->setUniform(mvp, "MVP");
         
         printf("Kezdeti idő: %d. nap, %02d:00 GMT (nyári napforduló)\n", currentDay, currentHour);
-}
+    }
     
     void onDisplay() override {
-    // Háttér törlése
-    glClearColor(0, 0, 0, 0);
-    glClear(GL_COLOR_BUFFER_BIT);
-    
-    // Shader program aktiválása
-    gpuProgram->Use();
-    
-    // Idő beállítása a shadernek
-    gpuProgram->setUniform(currentHour, "currentHour");
-    gpuProgram->setUniform(currentDay, "currentDay");
-    gpuProgram->setUniform(AXIS_TILT, "axisTilt");
-    
-    // Térkép rajzolása
-    gpuProgram->setUniform(0, "objectType");
-    map->Draw(gpuProgram);
-    
-    // Út rajzolása
-    gpuProgram->setUniform(1, "objectType");
-    path->Draw(gpuProgram);
-    
-    // Állomások rajzolása
-    gpuProgram->setUniform(2, "objectType");
-    for (auto station : stations) {
-        station->Draw(gpuProgram);
+        // Háttér törlése
+        glClearColor(0, 0, 0, 0);
+        glClear(GL_COLOR_BUFFER_BIT);
+        
+        // Shader program aktiválása
+        gpuProgram->Use();
+        
+        // Idő beállítása a shadernek
+        gpuProgram->setUniform(currentHour, "currentHour");
+        gpuProgram->setUniform(currentDay, "currentDay");
+        gpuProgram->setUniform(AXIS_TILT, "axisTilt");
+        
+        // Térkép rajzolása
+        map->Draw(gpuProgram);
+        
+        // Út rajzolása
+        path->Draw(gpuProgram);
+        
+        // Állomások rajzolása
+        for (auto station : stations) {
+            station->Draw(gpuProgram);
+        }
     }
-}
     
     void onKeyboard(int key) override {
         // 'n' gomb: óránként léptetjük az időt
