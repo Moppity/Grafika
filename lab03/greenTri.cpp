@@ -64,8 +64,11 @@ const char* fragmentSource = R"(
             
             bool daytime = isDaytime(texCoord);
             
+            const float help = 0.6;
+
+
             if (!daytime) {
-                fragmentColor = texColor * 0.5;
+                fragmentColor = texColor * 0.5 * help ;
             } else {
                 fragmentColor = texColor;
             }
