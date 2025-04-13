@@ -1,78 +1,59 @@
 #include "./framework.h"
 
 const char* fragmentSource = R"(
-    #version 330
+   #version 330
     precision highp float;
-    
+
     uniform sampler2D textureUnit;
     uniform int objectType;      
     uniform vec3 color;          
-    
+
     uniform int currentHour;        
     uniform float axisTilt;    
-    
+
     in vec2 texCoord;         
     out vec4 fragmentColor;
-    
-    const float pie = 3.14;
-    
-   
-    vec3 sphericalToCartesian(vec2 spherical) {
-        float lon = spherical.x;
-        float lat = spherical.y;
+
+    const float PI = 3.14159265359;
+
+    bool isDaytime(vec2 mercator) {
+        float longitude = (mercator.x - 0.5) * 2.0 * PI;
+        float latitude = (mercator.y - 0.5) * 2.0 * 85.0 * (PI / 180.0);
         
-        float x = cos(lat) * cos(lon);
-        float y = cos(lat) * sin(lon);
-        float z = sin(lat);
+        float hourAngle = float(currentHour) * (PI / 12.0);
         
-        return vec3(x, y, z);
+        float sunLat = axisTilt;
+        float sunLong = PI - hourAngle;
+        
+        vec3 pointNormal = vec3(
+            cos(latitude) * cos(longitude),
+            cos(latitude) * sin(longitude),
+            sin(latitude)
+        );
+        
+        vec3 sunDir = vec3(
+            cos(sunLat) * cos(sunLong),
+            cos(sunLat) * sin(sunLong),
+            sin(sunLat)
+        );
+        
+        float illumination = dot(pointNormal, sunDir);
+        
+        return illumination > 0.0;
     }
 
-    
-    vec2 mercatorToSpherical(vec2 mercator) {
-        float longitude = (mercator.x - 0.5) * 2.0 * 180.0; 
-        float latitude = (mercator.y - 0.5) * 2.0 * 85.0;    
-        
-        float lon = longitude * pie / 180.0;
-        float lat = latitude * pie / 180.0;
-        
-        return vec2(lon, lat);
-    }
-    
-    bool isDaytime(vec2 mercator) {
-        vec2 spherical = mercatorToSpherical(mercator);
-        
-        vec3 surfaceNormal = sphericalToCartesian(spherical);
-        
-        float declination = axisTilt;
-        
-        float hourAngle = float(currentHour) / 24.0 * 2.0 * pie;
-        
-        vec3 sunDirection;
-        sunDirection.x = -cos(hourAngle); 
-        sunDirection.y = -sin(hourAngle); 
-        sunDirection.z = sin(declination); 
-        
-        sunDirection = normalize(sunDirection);
-        
-        return dot(surfaceNormal, sunDirection) > 0.0;
-    }
-    
     void main() {
-        if (objectType == 0) { 
+        if (objectType == 0) {
             vec4 texColor = texture(textureUnit, texCoord);
             
             bool daytime = isDaytime(texCoord);
             
-            const float help = 0.6;
-
-
             if (!daytime) {
-                fragmentColor = texColor * 0.5 * help ;
+                fragmentColor = vec4(texColor.rgb * 0.5, texColor.a);
             } else {
                 fragmentColor = texColor;
             }
-        } else { 
+        } else {
             fragmentColor = vec4(color, 1.0);
         }
     }
@@ -83,13 +64,13 @@ const char* vertexSource = R"(
     precision highp float;
 
     uniform mat4 MVP;
-    layout(location = 0) in vec2 vp;      
-    layout(location = 1) in vec2 vertexUV; 
-    
+    layout(location = 0) in vec2 vp;
+    layout(location = 1) in vec2 vertexUV;
+
     out vec2 texCoord;
-    
+
     void main() {
-        gl_Position = vec4(vp.x, vp.y, 0, 1) * MVP;
+        gl_Position = MVP * vec4(vp, 0, 1);
         texCoord = vertexUV;
     }
 )";
@@ -97,11 +78,11 @@ const char* vertexSource = R"(
 
 const int winWidth = 600, winHeight = 600;
 const int textureWidth = 64, textureHeight = 64;
-const float pie = 3.14f;
+const float pie = 3.14159265359f;
 
 const float EARTH_RADIUS = 6371.0f; 
 const float EARTH_CIRCUMFERENCE = 40000.0f; 
-const float AXIS_TILT = 23.0f * pie / 180.0f; 
+const float AXIS_TILT = 23.5f * pie / 180.0f; 
 
 
 const unsigned char mapData[] = {
@@ -119,31 +100,28 @@ const unsigned char mapData[] = {
 int currentHour = 0;
 
 vec2 MercatorToSpherical(float u, float v) {
-    float longitude = (u - 0.5f) * 2.0f * 180.0f; 
-    float latitude = (v - 0.5f) * 2.0f * 85.0f;   
+    float longitude = (u - 0.5f) * 2.0f * 180.0f * (pie / 180.0f);
+    float latitude = (v - 0.5f) * 2.0f * 85.0f * (pie / 180.0f);
     
-    float lon = longitude * pie / 180.0f;
-    float lat = latitude * pie / 180.0f;
-    
-    return vec2(lon, lat);
+    return vec2(longitude, latitude);
+}
+
+vec3 SphericalToCartesian(float lon, float lat) {
+    return vec3(
+        cos(lat) * cos(lon),
+        cos(lat) * sin(lon),
+        sin(lat)
+    );
 }
 
 vec2 SphericalToMercator(float lon, float lat) {
     const float MAX_LAT = 85.0f * pie / 180.0f;
     lat = fmax(-MAX_LAT, fmin(MAX_LAT, lat));
     
-    float u = (lon / pie / 2.0f) + 0.5f;
-    float v = (lat / MAX_LAT / 2.0f) + 0.5f;
+    float u = (lon / (2.0f * pie)) + 0.5f;
+    float v = (lat / (2.0f * MAX_LAT)) + 0.5f;
     
     return vec2(u, v);
-}
-
-vec3 SphericalToCartesian(float lon, float lat) {
-    float x = cos(lat) * cos(lon);
-    float y = cos(lat) * sin(lon);
-    float z = sin(lat);
-    
-    return vec3(x, y, z);
 }
 
 vec3 SphericalToCartesian(vec2 spherical) {
@@ -161,7 +139,7 @@ vec2 CartesianToSpherical(vec3 p) {
 
 vec2 PixelToMercator(int x, int y) {
     float u = (float)x / winWidth;
-    float v = 1.0f - (float)y / winHeight; 
+    float v = 1.0f - (float)y / winHeight;  
     return vec2(u, v);
 }
 
@@ -172,8 +150,12 @@ vec2 MercatorToPixel(float u, float v) {
 }
 
 float CalculateDistance(vec3 p1, vec3 p2) {
+    p1 = normalize(p1);
+    p2 = normalize(p2);
+    
     float dotProduct = dot(p1, p2);
     dotProduct = fmax(-1.0f, fmin(1.0f, dotProduct));
+    
     float angle = acos(dotProduct);
     
     float distanceKm = angle * EARTH_RADIUS;
@@ -182,11 +164,14 @@ float CalculateDistance(vec3 p1, vec3 p2) {
 }
 
 std::vector<vec3> CalculateGreatCirclePoints(vec3 p1, vec3 p2, int segments) {
+    p1 = normalize(p1);
+    p2 = normalize(p2);
+    
     std::vector<vec3> points;
     points.reserve(segments + 1);
     
     float dotProduct = dot(p1, p2);
-    dotProduct = fmax(-1.0f, fmin(1.0f, dotProduct)); 
+    dotProduct = fmax(-1.0f, fmin(1.0f, dotProduct));
     float omega = acos(dotProduct);
     
     for (int i = 0; i <= segments; i++) {
@@ -194,13 +179,12 @@ std::vector<vec3> CalculateGreatCirclePoints(vec3 p1, vec3 p2, int segments) {
         
         vec3 p;
         if (omega < 0.00001f) {
-            p = p1; 
+            p = p1;
         } else {
             p = (sin((1.0f - t) * omega) * p1 + sin(t * omega) * p2) / sin(omega);
         }
         
         p = normalize(p);
-        
         points.push_back(p);
     }
     
@@ -322,39 +306,39 @@ public:
     
     
     void AddSegment(vec2 startPos, vec2 endPos) {
-        vec2 spherical1 = MercatorToSpherical(startPos.x, startPos.y);
-        vec2 spherical2 = MercatorToSpherical(endPos.x, endPos.y);
-                
-        vec3 p1 = SphericalToCartesian(spherical1);
-        vec3 p2 = SphericalToCartesian(spherical2);
-        
-        float distance = CalculateDistance(p1, p2);
-        distances.push_back(distance);
-        
-        printf("Distance: %.0f km\n", distance);
-        
-        const int segments = 100;
-        std::vector<vec3> greatCirclePoints = CalculateGreatCirclePoints(p1, p2, segments);
-        
-        std::vector<float> lineVertices;
-        lineVertices.reserve((segments + 1) * 2);
-        
-        for (const vec3& p : greatCirclePoints) {
-            vec2 spherical = CartesianToSpherical(p);
+    
+    vec2 spherical1 = MercatorToSpherical(startPos.x, startPos.y);
+    vec2 spherical2 = MercatorToSpherical(endPos.x, endPos.y);
             
-            vec2 uv = SphericalToMercator(spherical.x, spherical.y);
-            
-            float x = uv.x * 2.0f - 1.0f;
-            float y = uv.y * 2.0f - 1.0f;
-            
-            lineVertices.push_back(x);
-            lineVertices.push_back(y);
-        }
+    
+    vec3 p1 = SphericalToCartesian(spherical1);
+    vec3 p2 = SphericalToCartesian(spherical2);
+    
+    float distance = CalculateDistance(p1, p2);
+    distances.push_back(distance);
+    
+    printf("Distance: %.0f km\n", distance);
+    
+    const int segments = 100;
+    std::vector<vec3> greatCirclePoints = CalculateGreatCirclePoints(p1, p2, segments);
+    
+    std::vector<float> lineVertices;
+    lineVertices.reserve((segments + 1) * 2);
+    
+    for (const vec3& p : greatCirclePoints) {
+        vec2 spherical = CartesianToSpherical(p);
+        vec2 uv = SphericalToMercator(spherical.x, spherical.y);
         
-        lineSegments.push_back(lineVertices);
+        float x = uv.x * 2.0f - 1.0f;
+        float y = uv.y * 2.0f - 1.0f;
         
-        initialized = true;
+        lineVertices.push_back(x);
+        lineVertices.push_back(y);
     }
+    
+    lineSegments.push_back(lineVertices);
+    initialized = true;
+}
     
     void Draw(GPUProgram* gpuProgram) override {
         if (!initialized || lineSegments.empty()) return;
@@ -427,23 +411,25 @@ public:
     }
     
     void onInitialization() override {
-        glViewport(0, 0, winWidth, winHeight);
-        
-        gpuProgram = new GPUProgram(vertexSource, fragmentSource);
-        
-        map = new Map();
-        
-        path = new Path();
+    glViewport(0, 0, winWidth, winHeight);
     
-        currentHour = 0;
+    gpuProgram = new GPUProgram(vertexSource, fragmentSource);
+    
+    map = new Map();
+    
+    path = new Path();
 
-        gpuProgram->setUniform(currentHour, "currentHour");
-        gpuProgram->setUniform(AXIS_TILT, "axisTilt"); 
-        
-        mat4 mvp = mat4(1.0f);
-        gpuProgram->setUniform(mvp, "MVP");
-        
-    }
+    currentHour = 0;
+    
+    // Pontosan 23.0 fok radiĂĄnban
+    float exactAxisTilt = 23.0f * 3.14159265359f / 180.0f;
+    
+    gpuProgram->setUniform(currentHour, "currentHour");
+    gpuProgram->setUniform(exactAxisTilt, "axisTilt"); 
+    
+    mat4 mvp = mat4(1.0f);
+    gpuProgram->setUniform(mvp, "MVP");
+}
     
     void onDisplay() override {
         glClearColor(0, 0, 0, 0);
@@ -482,7 +468,6 @@ public:
                 vec2 currPos = stations[stations.size() - 1]->GetPosition();
                 
                 path->AddSegment(prevPos, currPos);
-                
             }
             
             refreshScreen();
